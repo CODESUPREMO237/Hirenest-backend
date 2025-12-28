@@ -1,0 +1,117 @@
+jobconnect-backend/
+├── src/
+│   ├── config/
+│   │   ├── database.js           ✅
+│   │   ├── firebase.js           ✅
+│   │   └── logger.js             ✅
+│   │
+│   ├── models/
+│   │   ├── User.js               ✅
+│   │   ├── Job.js                ✅
+│   │   ├── Product.js            ✅
+│   │   ├── Application.js        ✅
+│   │   ├── Chat.js               ✅
+│   │   ├── Message.js            ✅
+│   │   ├── Company.js            ✅
+│   │   └── Order.js              ✅ NEW!
+│   │
+│   ├── controllers/
+│   │   ├── auth.controller.js    ✅
+│   │   ├── user.controller.js    ✅
+│   │   ├── job.controller.js     ✅
+│   │   ├── marketplace.controller.js ✅
+│   │   ├── application.controller.js ✅
+│   │   ├── chat.controller.js    ✅
+│   │   ├── company.controller.js ✅
+│   │   └── admin.controller.js   ✅
+│   │
+│   ├── routes/
+│   │   ├── auth.routes.js        ✅
+│   │   ├── user.routes.js        ✅
+│   │   ├── job.routes.js         ✅
+│   │   ├── marketplace.routes.js ✅
+│   │   ├── application.routes.js ✅
+│   │   ├── chat.routes.js        ✅
+│   │   ├── company.routes.js     ✅
+│   │   ├── admin.routes.js       ✅
+│   │   ├── analytics.routes.js   ✅
+│   │   ├── payment.routes.js     ✅ UPDATED!
+│   │   └── guest.routes.js       ✅
+│   │
+│   ├── middleware/
+│   │   ├── auth.middleware.js        ✅
+│   │   ├── upload.middleware.js      ✅
+│   │   ├── validation.middleware.js  ✅
+│   │   ├── error.middleware.js       ✅ NEW!
+│   │   └── rateLimiter.middleware.js ✅ NEW!
+│   │
+│   ├── services/
+│   │   ├── email.service.js      ✅
+│   │   └── payment.service.js    ✅ UPDATED (MeSomb)!
+│   │
+│   ├── socket/
+│   │   ├── socket.handlers.js    ✅
+│   │   └── notification.socket.js ✅ NEW!
+│   │
+│   ├── utils/
+│   │   ├── apiResponse.js        ✅ NEW!
+│   │   ├── constants.js          ✅ NEW!
+│   │   └── helpers.js            ✅ NEW!
+│   │
+│   └── server.js                 ✅
+│
+├── uploads/
+├── logs/
+├── package.json                  ✅ (axios added)
+├── .env.example                  ✅ (MeSomb added)
+├── README.md                     ✅
+├── API_TESTING_GUIDE.md          ✅
+├── COMPLETE_API_DOCUMENTATION.md ✅
+├── FINAL_COMPLETE_SETUP_GUIDE.md ✅
+└── MESOMB_PAYMENT_GUIDE.md       ✅ NEW!
+
+
+
+import { v2 as cloudinary } from 'cloudinary';
+
+(async function() {
+
+    // Configuration
+    cloudinary.config({ 
+        cloud_name: 'dehfxzi1o', 
+        api_key: '488999857182661', 
+        api_secret: '3mUB3ijjnDV0SD9AYCVGj3dCXgw' 
+    });
+    
+    // Upload an image
+     const uploadResult = await cloudinary.uploader
+       .upload(
+           'https://res.cloudinary.com/demo/image/upload/getting-started/shoes.jpg', {
+               public_id: 'shoes',
+           }
+       )
+       .catch((error) => {
+           console.log(error);
+       });
+    
+    console.log(uploadResult);
+    
+    // Optimize delivery by resizing and applying auto-format and auto-quality
+    const optimizeUrl = cloudinary.url('shoes', {
+        fetch_format: 'auto',
+        quality: 'auto'
+    });
+    
+    console.log(optimizeUrl);
+    
+    // Transform the image: auto-crop to square aspect_ratio
+    const autoCropUrl = cloudinary.url('shoes', {
+        crop: 'auto',
+        gravity: 'auto',
+        width: 500,
+        height: 500,
+    });
+    
+    console.log(autoCropUrl);    
+})();
+

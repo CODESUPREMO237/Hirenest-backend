@@ -1276,3 +1276,27 @@
 [31m    at Server.emit (node:events:519:35)[39m
 [31m    at emitCloseNT (node:net:2416:8)[39m
 [31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m
+2025-12-29 18:02:20:220 [31merror[39m: [31munhandledRejection: Connection.prototype.close() no longer accepts a callback[39m
+[31mMongooseError: Connection.prototype.close() no longer accepts a callback[39m
+[31m    at NativeConnection.close (D:\project\mobile_apps\backends\JobConnect\Backend\node_modules\mongoose\lib\connection.js:1205:11)[39m
+[31m    at Server.<anonymous> (D:\project\mobile_apps\backends\JobConnect\Backend\src\server.js:409:29)[39m
+[31m    at Object.onceWrapper (node:events:621:28)[39m
+[31m    at Server.emit (node:events:519:35)[39m
+[31m    at emitCloseNT (node:net:2416:8)[39m
+[31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m
+2025-12-29 18:08:48:848 [31merror[39m: [31munhandledRejection: Connection.prototype.close() no longer accepts a callback[39m
+[31mMongooseError: Connection.prototype.close() no longer accepts a callback[39m
+[31m    at NativeConnection.close (D:\project\mobile_apps\backends\JobConnect\backend\node_modules\mongoose\lib\connection.js:1205:11)[39m
+[31m    at Server.<anonymous> (D:\project\mobile_apps\backends\JobConnect\backend\src\server.js:409:29)[39m
+[31m    at Object.onceWrapper (node:events:621:28)[39m
+[31m    at Server.emit (node:events:519:35)[39m
+[31m    at emitCloseNT (node:net:2416:8)[39m
+[31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m
+2025-12-29 18:09:48:948 [31merror[39m: [31munhandledRejection: Connection.prototype.close() no longer accepts a callback[39m
+[31mMongooseError: Connection.prototype.close() no longer accepts a callback[39m
+[31m    at NativeConnection.close (D:\project\mobile_apps\backends\JobConnect\backend\node_modules\mongoose\lib\connection.js:1205:11)[39m
+[31m    at Server.<anonymous> (D:\project\mobile_apps\backends\JobConnect\backend\src\server.js:409:29)[39m
+[31m    at Object.onceWrapper (node:events:621:28)[39m
+[31m    at Server.emit (node:events:519:35)[39m
+[31m    at emitCloseNT (node:net:2416:8)[39m
+[31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m

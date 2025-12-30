@@ -119,7 +119,6 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ buyer: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ 'payment.mesombReference': 1 });
-orderSchema.index({ orderNumber: 1 });
 
 const Order = mongoose.model('Order', orderSchema);
 

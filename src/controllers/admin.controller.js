@@ -5,10 +5,10 @@ const User = require('../models/User');
 const Job = require('../models/Job');
 const Product = require('../models/Product');
 const Application = require('../models/Application');
-const { Chat, Message } = require('../models/Chat');
 const Company = require('../models/Company');
 const logger = require('../config/logger');
-
+const Chat = require('../models/chat');       
+const Message = require('../models/Message');
 /**
  * Get dashboard overview
  */

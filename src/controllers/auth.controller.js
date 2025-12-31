@@ -154,39 +154,131 @@ const login = async (req, res) => {
 /**
  * Social auth for Google (Firebase token verification)
  */
+/**
+ * Social auth for Google (Firebase token verification)
+ * ✅ NOW WITH AUTO-REGISTRATION
+ */
 const socialAuth = async (req, res) => {
   try {
     const { provider, idToken } = req.body;
     if (provider !== 'google') {
-      return res.status(400).json({ status: 'error', message: 'Use specific social endpoint for GitHub/Twitter' });
-    }
-
-    const decodedToken = await verifyIdToken(idToken);
-    const user = await User.findOne({ firebaseUid: decodedToken.uid });
-
-    // BLOCK AUTO-REGISTRATION: Only allow if account exists in DB
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Account not found. Please register first.',
-        code: 'USER_NOT_REGISTERED'
+      return res.status(400).json({ 
+        status: 'error', 
+        message: 'Use specific social endpoint for GitHub/Twitter' 
       });
     }
 
-    user.lastLogin = new Date();
-    user.loginCount += 1;
-    await user.save({ validateBeforeSave: false });
+    // Verify Firebase token
+    const decodedToken = await verifyIdToken(idToken);
+    
+    // Try to find existing user
+    let user = await User.findOne({ firebaseUid: decodedToken.uid });
+    let isNewUser = false;
 
+    // ✅ AUTO-CREATE ACCOUNT if user doesn't exist
+    if (!user) {
+      logger.info(`Creating new account for Google user: ${decodedToken.email}`);
+
+      // Get additional user info from Firebase token
+      const displayName = decodedToken.name || decodedToken.email.split('@')[0];
+      const firstName = decodedToken.given_name || displayName.split(' ')[0] || '';
+      const lastName = decodedToken.family_name || displayName.split(' ').slice(1).join(' ') || '';
+
+      // Create user in MongoDB (Firebase user already exists)
+      user = await User.create({
+        firebaseUid: decodedToken.uid,
+        email: decodedToken.email,
+        role: 'jobseeker', // Default role for social sign-ups
+        profile: {
+          firstName: firstName,
+          lastName: lastName,
+          displayName: displayName,
+          avatar: decodedToken.picture || null,
+        },
+        isEmailVerified: decodedToken.email_verified || false,
+        socialLogins: {
+          google: {
+            id: decodedToken.user_id || decodedToken.uid,
+            email: decodedToken.email,
+            displayName: displayName,
+            profileImage: decodedToken.picture || null,
+            lastLogin: new Date(),
+            linkedAt: new Date(),
+          }
+        },
+        jobSeekerProfile: {},
+        marketplaceStats: {
+          productsPosted: 0,
+          activeProducts: 0,
+          totalViews: 0,
+          sellerRating: { average: 0, count: 0 }
+        }
+      });
+
+      // Set custom claims for the new user
+      await setCustomUserClaims(decodedToken.uid, { role: 'jobseeker' });
+
+      isNewUser = true;
+      logger.info(`New Google user created: ${user.email}`);
+
+      // Send welcome email in background (optional)
+      setImmediate(async () => {
+        try {
+          await sendWelcomeEmail(user.email, firstName || 'User', 'jobseeker');
+          logger.info(`Welcome email sent to ${user.email}`);
+        } catch (emailError) {
+          logger.error('Welcome email error:', emailError);
+        }
+      });
+    } else {
+      // Update existing user login info
+      user.lastLogin = new Date();
+      user.loginCount = (user.loginCount || 0) + 1;
+      
+      // Update Google social login info
+      if (!user.socialLogins) user.socialLogins = {};
+      user.socialLogins.google = {
+        id: decodedToken.user_id || decodedToken.uid,
+        email: decodedToken.email,
+        displayName: decodedToken.name || user.profile.displayName,
+        profileImage: decodedToken.picture || null,
+        lastLogin: new Date(),
+        linkedAt: user.socialLogins.google?.linkedAt || new Date(),
+      };
+      
+      await user.save({ validateBeforeSave: false });
+      logger.info(`Existing Google user logged in: ${user.email}`);
+    }
+
+    // Generate backend JWT tokens
     const tokens = generateTokenPair(user._id, user.role, user.email);
 
     res.status(200).json({
       status: 'success',
-      message: 'Social authentication successful',
-      data: { user, tokens, isNewUser: false }
+      message: isNewUser 
+        ? 'Account created successfully with Google' 
+        : 'Social authentication successful',
+      data: { 
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          profile: user.profile,
+          firebaseUid: user.firebaseUid,
+          isEmailVerified: user.isEmailVerified,
+          socialLogins: user.socialLogins
+        }, 
+        tokens, 
+        isNewUser 
+      }
     });
   } catch (error) {
     logger.error('Social auth error:', error);
-    res.status(500).json({ status: 'error', message: 'Social authentication failed' });
+    res.status(500).json({ 
+      status: 'error', 
+      message: 'Social authentication failed',
+      error: error.message 
+    });
   }
 };
 

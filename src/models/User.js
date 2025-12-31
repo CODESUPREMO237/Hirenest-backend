@@ -156,13 +156,14 @@ const userSchema = new mongoose.Schema({
   
   // In your User model schema
 socialLogins: {
-    google: {
-      id: String,
-      email: String,
-      profileImage: String,
-      lastLogin: Date,
-      linkedAt: Date
-    },
+  google: {
+    id: String,
+    email: String,
+    displayName: String,
+    profileImage: String,
+    lastLogin: Date,
+    linkedAt: Date,
+  },
      microsoft: {
     id: String,
     email: String,

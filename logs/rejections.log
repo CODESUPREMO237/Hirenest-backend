@@ -1308,3 +1308,19 @@
 [31m    at Server.emit (node:events:519:35)[39m
 [31m    at emitCloseNT (node:net:2416:8)[39m
 [31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m
+2025-12-31 16:37:35:3735 [31merror[39m: [31munhandledRejection: Connection.prototype.close() no longer accepts a callback[39m
+[31mMongooseError: Connection.prototype.close() no longer accepts a callback[39m
+[31m    at NativeConnection.close (D:\project\mobile_apps\backends\JobConnect\Backend\node_modules\mongoose\lib\connection.js:1205:11)[39m
+[31m    at Server.<anonymous> (D:\project\mobile_apps\backends\JobConnect\Backend\src\server.js:409:29)[39m
+[31m    at Object.onceWrapper (node:events:621:28)[39m
+[31m    at Server.emit (node:events:519:35)[39m
+[31m    at emitCloseNT (node:net:2416:8)[39m
+[31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m
+2025-12-31 17:20:09:209 [31merror[39m: [31munhandledRejection: Connection.prototype.close() no longer accepts a callback[39m
+[31mMongooseError: Connection.prototype.close() no longer accepts a callback[39m
+[31m    at NativeConnection.close (D:\project\mobile_apps\backends\JobConnect\Backend\node_modules\mongoose\lib\connection.js:1205:11)[39m
+[31m    at Server.<anonymous> (D:\project\mobile_apps\backends\JobConnect\Backend\src\server.js:409:29)[39m
+[31m    at Object.onceWrapper (node:events:621:28)[39m
+[31m    at Server.emit (node:events:519:35)[39m
+[31m    at emitCloseNT (node:net:2416:8)[39m
+[31m    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)[39m

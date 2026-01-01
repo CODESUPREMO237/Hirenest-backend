@@ -65,8 +65,8 @@ try {
   console.log('  ✓ analytics routes');
   const paymentRoutes = require('./routes/payment.routes');
   console.log('  ✓ payment routes');
-  const guestRoutes = require('./routes/guest.routes');
-  console.log('  ✓ guest routes');
+  const reviewRoutes = require('./routes/reviewRoutes'); 
+  console.log('  ✓ review routes');
   console.log('✅ Step 4: All routes loaded');
 } catch (error) {
   console.error('❌ Failed at Step 4 (routes):', error.message);
@@ -119,8 +119,7 @@ const companyRoutes = require('./routes/company.routes');
 const adminRoutes = require('./routes/admin.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const paymentRoutes = require('./routes/payment.routes');
-const guestRoutes = require('./routes/guest.routes');
-
+const reviewRoutes = require('./routes/reviewRoutes'); 
 const { errorHandler } = require('./middleware/error.middleware');
 const { rateLimiter } = require('./middleware/rateLimiter.middleware');
 const { initializeSocketHandlers } = require('./socket/socket.handlers');
@@ -328,10 +327,16 @@ try {
   app.use(`/api/${API_VERSION}/payments`, paymentRoutes);
   console.log('  ✓ payment routes registered');
   
-  console.log('  → Registering guest routes...');
-  console.log('    guestRoutes type:', typeof guestRoutes, guestRoutes.constructor?.name);
-  app.use(`/api/${API_VERSION}/guest`, guestRoutes);
-  console.log('  ✓ guest routes registered');
+// Register review routes
+console.log('  → Registering reviews routes...');
+app.use(`/api/${API_VERSION}/reviews`, reviewRoutes); // ✅ Use reviewRoutes (matches the import)
+
+// ✅ Optional: Add this debug log to verify routes are registered
+console.log('    ✓ Review routes registered at /api/v1/reviews');
+
+  console.log('    reviewRoutes type:', typeof reviewRoutes, reviewRoutes.constructor?.name);
+
+
 
   // 404 handler
   app.use('*', (req, res) => {

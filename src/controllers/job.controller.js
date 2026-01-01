@@ -63,6 +63,9 @@ const createJob = async (req, res) => {
 /**
  * Get all jobs with filters
  */
+/**
+ * Get all jobs with filters
+ */
 const getAllJobs = async (req, res) => {
   try {
     const {
@@ -101,6 +104,7 @@ const getAllJobs = async (req, res) => {
     // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const jobs = await query
+      .populate('company', 'name logo')
       .skip(skip)
       .limit(parseInt(limit));
 
@@ -120,28 +124,59 @@ const getAllJobs = async (req, res) => {
       });
     }
 
-    // Map through jobs to add isApplied status
-    let jobsWithAppliedStatus = jobs.map(j => j.toObject());
-    
+    // Get user's applications (single query instead of N queries)
+    let appliedJobIds = [];
     if (req.user) {
       const userApplications = await Application.find({ 
         applicant: req.user._id,
         job: { $in: jobs.map(j => j._id) },
         deletedAt: null
-      });
+      }).select('job');
       
-      const appliedJobIds = userApplications.map(a => a.job.toString());
-      
-      jobsWithAppliedStatus = jobsWithAppliedStatus.map(job => ({
-        ...job,
-        isApplied: appliedJobIds.includes(job._id.toString())
-      }));
+      appliedJobIds = userApplications.map(a => a.job.toString());
     }
+
+    // Get application counts for all jobs (single aggregation query)
+    const applicationCounts = await Application.aggregate([
+      {
+        $match: {
+          job: { $in: jobs.map(j => j._id) },
+          deletedAt: null
+        }
+      },
+      {
+        $group: {
+          _id: '$job',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create a map for quick lookup
+    const appCountMap = {};
+    applicationCounts.forEach(item => {
+      appCountMap[item._id.toString()] = item.count;
+    });
+
+    // Map jobs with all details
+    const jobsWithDetails = jobs.map(job => {
+      const jobObj = job.toObject();
+      const jobId = jobObj._id.toString();
+
+      return {
+        ...jobObj,
+        stats: {
+          ...jobObj.stats,
+          applications: appCountMap[jobId] || 0
+        },
+        isApplied: appliedJobIds.includes(jobId)
+      };
+    });
 
     res.status(200).json({
       status: 'success',
       data: {
-        jobs: jobsWithAppliedStatus,
+        jobs: jobsWithDetails,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -158,11 +193,6 @@ const getAllJobs = async (req, res) => {
     });
   }
 };
-
-/**
- * Get single job by ID with proper view tracking
- */
-
 
     /**
  * Get single job by ID with proper view tracking (DEBUG VERSION)

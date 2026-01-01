@@ -253,25 +253,32 @@ const socialAuth = async (req, res) => {
     // Generate backend JWT tokens
     const tokens = generateTokenPair(user._id, user.role, user.email);
 
-    res.status(200).json({
-      status: 'success',
-      message: isNewUser 
-        ? 'Account created successfully with Google' 
-        : 'Social authentication successful',
-      data: { 
-        user: {
-          id: user._id,
-          email: user.email,
-          role: user.role,
-          profile: user.profile,
-          firebaseUid: user.firebaseUid,
-          isEmailVerified: user.isEmailVerified,
-          socialLogins: user.socialLogins
-        }, 
-        tokens, 
-        isNewUser 
-      }
-    });
+    // At the end of socialAuth function, change this:
+res.status(200).json({
+  status: 'success',
+  message: isNewUser 
+    ? 'Account created successfully with Google' 
+    : 'Social authentication successful',
+  data: { 
+    user: {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      profile: user.profile,
+      firebaseUid: user.firebaseUid,
+      isEmailVerified: user.isEmailVerified,
+      socialLogins: user.socialLogins,
+      marketplaceStats: user.marketplaceStats,
+      // ✅ Add these to avoid needing immediate profile fetch
+      ...(user.role === 'jobseeker' && { jobSeekerProfile: user.jobSeekerProfile }),
+      ...(user.role === 'employer' && { employerProfile: user.employerProfile }),
+      privacySettings: user.privacySettings,
+      notificationPreferences: user.notificationPreferences,
+    }, 
+    tokens, 
+    isNewUser 
+  }
+});
   } catch (error) {
     logger.error('Social auth error:', error);
     res.status(500).json({ 

@@ -153,6 +153,19 @@ const userSchema = new mongoose.Schema({
       }
     }
   },
+ 
+  ratingsAverage: {
+    type: Number,
+    default: 0,
+    min: [0, 'Rating must be above 0'],
+    max: [5, 'Rating must be below 5'],
+    set: val => Math.round(val * 10) / 10 // Rounds to 4.8
+  },
+  ratingsQuantity: {
+    type: Number,
+    default: 0
+  },
+
   
   // In your User model schema
 socialLogins: {

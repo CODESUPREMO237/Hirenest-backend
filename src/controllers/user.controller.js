@@ -686,6 +686,22 @@ const upgradeFromGuest = async (req, res) => {
     });
   }
 };
+// src/controllers/user.controller.js
+const searchUsers = async (req, res) => {
+  try {
+    const { email } = req.query;
+    const users = await User.find({
+      email: { $regex: email, $options: 'i' }
+    }).select('fullName email profile');
+
+    res.status(200).json({
+      status: 'success',
+      data: users
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
 
 module.exports = {
   getMyProfile,
@@ -703,5 +719,6 @@ module.exports = {
   removeFCMToken,
   deleteAccount,
   upgradeFromGuest,
-  getActiveSessions
+  getActiveSessions,
+  searchUsers
 };

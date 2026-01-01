@@ -14,7 +14,8 @@ const {
   addAdmin,
   removeAdmin,
   getCompanyJobs,
-  getIndustries
+  getIndustries,
+  getMyCompanyAdmins
 } = require('../controllers/company.controller');
 
 const { authenticate, authorize } = require('../middleware/auth.middleware');
@@ -28,7 +29,7 @@ router.get('/industries', getIndustries);
 // Protected static routes
 // IMPORTANT: This MUST be above /:id so Express doesn't treat 'my-company' as an ID
 router.get('/my-company', authenticate, authorize('employer'), getMyCompany);
-
+router.get('/admins', authenticate, authorize('employer'), getMyCompanyAdmins);
 // --- 2. BASE COLLECTION ROUTES ---
 
 router.get('/', getAllCompanies);

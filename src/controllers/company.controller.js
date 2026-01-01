@@ -568,6 +568,38 @@ const getIndustries = async (req, res) => {
     });
   }
 };
+/**
+ * Get admins for the current user's company
+ */
+const getMyCompanyAdmins = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const company = await Company.findOne({
+      $or: [{ createdBy: userId }, { admins: userId }],
+      deletedAt: null
+    }).populate('admins', 'profile email'); // Populate to get actual user details
+
+    if (!company) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Company not found'
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { admins: company.admins }
+    });
+  } catch (error) {
+    logger.error('Error fetching company admins:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error fetching admins'
+    });
+  }
+};
+
 
 module.exports = {
   createCompany,
@@ -580,5 +612,6 @@ module.exports = {
   addAdmin,
   removeAdmin,
   getCompanyJobs,
-  getIndustries
+  getIndustries,
+  getMyCompanyAdmins
 };

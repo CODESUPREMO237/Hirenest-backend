@@ -473,6 +473,50 @@ jobSchema.post('save', async function(doc) {
     }
   }
 });
+/**
+ * Helper function to update company stats
+ */
+const updateCompanyJobStats = async (companyId) => {
+  try {
+    const JobModel = mongoose.model('Job');
+    const CompanyModel = mongoose.model('Company');
+
+    // Count all non-deleted jobs with status 'active' for this company
+    const activeJobsCount = await JobModel.countDocuments({
+      company: companyId,
+      status: 'active',
+      deletedAt: null
+    });
+
+    // Update the company's stats.activeJobs field
+    await CompanyModel.findByIdAndUpdate(companyId, {
+      'stats.activeJobs': activeJobsCount
+    });
+    
+    console.log(`Updated Company ${companyId} active jobs to: ${activeJobsCount}`);
+  } catch (error) {
+    console.error('Error updating company job stats:', error);
+  }
+};
+
+// 1. Update after a new job is created
+jobSchema.post('save', async function (doc) {
+  await updateCompanyJobStats(doc.company);
+});
+
+// 2. Update after a job is updated (e.g., status changed to 'closed' or soft-deleted)
+jobSchema.post('findOneAndUpdate', async function (doc) {
+  if (doc) {
+    await updateCompanyJobStats(doc.company);
+  }
+});
+
+// 3. Update after a job is removed from database
+jobSchema.post('findOneAndDelete', async function (doc) {
+  if (doc) {
+    await updateCompanyJobStats(doc.company);
+  }
+});
 
 const Job = mongoose.model('Job', jobSchema);
 

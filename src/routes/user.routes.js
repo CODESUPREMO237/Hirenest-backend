@@ -16,7 +16,8 @@ const {
   removeFCMToken,
   deleteAccount,
   upgradeFromGuest,
-  getActiveSessions
+  getActiveSessions,
+  searchUsers
 } = require('../controllers/user.controller');
 
 const { 
@@ -169,6 +170,13 @@ router.post('/me/upgrade', authenticate, authorize('guest'), validate(upgradeAcc
 router.delete('/me', authenticate, deleteAccount);
 
 // ==================== PUBLIC ROUTES ====================
+/**
+ * @route   GET /api/v1/users/search
+ * @desc    Search users by email or name
+ * @access  Private (Authenticated users)
+ */
+// ✅ THIS MUST BE ABOVE /:id
+router.get('/search', authenticate, searchUsers);
 
 /**
  * @route   GET /api/v1/users/:id
@@ -212,11 +220,10 @@ router.delete('/me/notifications/:timestamp', authenticate, async (req, res) => 
   }
 });
 
-
-
-// lib/routes/user.routes.js
-
 // Add this line above the module.exports
 router.get('/:id/public-profile', optionalAuthenticate, getUserById);
+
+
+
 
 module.exports = router;

@@ -4,13 +4,15 @@ const {
   createReview, 
   getUserReviews, 
   getJobReviews, 
-  deleteReview 
+  deleteReview ,
+  checkUserReview
 } = require('../controllers/reviewController');
 
 // ✅ FIX: Use 'authenticate' instead of 'protect'
 const { authenticate } = require('../middleware/auth.middleware');
 
 // Routes
+router.get('/check/:jobId', authenticate, checkUserReview); // ✅ ADD THIS LINE
 router.post('/', authenticate, createReview); // Changed from protect to authenticate
 router.get('/user/:userId', getUserReviews);
 router.get('/job/:jobId', getJobReviews);

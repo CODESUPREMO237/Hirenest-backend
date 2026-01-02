@@ -241,3 +241,32 @@ exports.deleteReview = async (req, res) => {
     });
   }
 };
+
+/**
+ * Check if the authenticated user has already reviewed a specific job
+ * GET /api/v1/reviews/check/:jobId
+ */
+exports.checkUserReview = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const reviewerId = req.user._id;
+
+    const existingReview = await Review.findOne({
+      job: jobId,
+      reviewer: reviewerId
+    });
+
+    res.status(200).json({
+      status: 'success',
+      hasReviewed: !!existingReview // Returns true if review exists, false otherwise
+    });
+    
+  } catch (err) {
+    logger.error('Error checking review status:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error checking review status',
+      hasReviewed: false // Default to false on error to avoid locking UI
+    });
+  }
+};

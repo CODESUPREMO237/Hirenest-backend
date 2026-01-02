@@ -204,6 +204,16 @@ const applyToJob = async (req, res) => {
  * Route: GET /my-applications
  * ✅ NEW FUNCTION - For job seekers to get their own applications
  */
+/**
+ * Get my applications (Job Seeker only)
+ * Route: GET /my-applications
+ * ✅ FIXED VERSION - Properly populates job with employer details
+ */
+/**
+ * Get my applications (Job Seeker only)
+ * Route: GET /my-applications
+ * ✅ FIXED VERSION - Ensures job is ALWAYS populated with employer details
+ */
 const getMyApplicationsAsJobSeeker = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -221,14 +231,20 @@ const getMyApplicationsAsJobSeeker = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Fetch applications with full job and company details
+    // ✅ FIX: Fetch applications with DEEPLY populated job details
     const applications = await Application.find(query)
       .populate({
         path: 'job',
-        populate: { 
-          path: 'postedBy company',
-          select: '-password -otp -otpExpires'
-        }
+        populate: [
+          { 
+            path: 'postedBy',
+            select: 'profile email role'
+          },
+          {
+            path: 'company',
+            select: 'name logo'
+          }
+        ]
       })
       .populate({
         path: 'applicant',
@@ -236,16 +252,37 @@ const getMyApplicationsAsJobSeeker = async (req, res) => {
       })
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean(); // ✅ ADD: Convert to plain objects for easier serialization
 
     const total = await Application.countDocuments(query);
 
-    logger.info(`Fetched ${applications.length} applications for user ${userId}`);
+    // ✅ ADD: Filter out applications where job was deleted
+    const validApplications = applications.filter(app => app.job != null);
+
+    if (validApplications.length < applications.length) {
+      logger.warn(`${applications.length - validApplications.length} applications have deleted jobs`);
+    }
+
+    // ✅ ADD: Debug logging
+    if (validApplications.length > 0) {
+      const firstApp = validApplications[0];
+      logger.info('First application check:', {
+        id: firstApp._id,
+        jobType: typeof firstApp.job,
+        jobId: firstApp.job?._id,
+        hasPostedBy: !!firstApp.job?.postedBy,
+        postedById: firstApp.job?.postedBy?._id,
+        hasCompany: !!firstApp.job?.company
+      });
+    }
+
+    logger.info(`Fetched ${validApplications.length} applications for user ${userId}`);
 
     res.status(200).json({
       status: 'success',
       data: {
-        applications,
+        applications: validApplications,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),

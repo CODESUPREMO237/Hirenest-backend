@@ -132,7 +132,7 @@ const login = async (req, res) => {
          );
        } catch (e) { /* silent */ }
     }
-
+// console.log(tokens);
     res.status(200).json({
       status: 'success',
       message: 'Login successful',
@@ -252,7 +252,7 @@ const socialAuth = async (req, res) => {
 
     // Generate backend JWT tokens
     const tokens = generateTokenPair(user._id, user.role, user.email);
-
+// console.log(tokens);
     // At the end of socialAuth function, change this:
 res.status(200).json({
   status: 'success',

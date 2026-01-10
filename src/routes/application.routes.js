@@ -10,6 +10,8 @@ const {
   applyToJob,
   getMyApplicationsAsJobSeeker,  // ✅ NEW: For job seekers
   getJobApplications,            // ✅ RENAMED: For employers
+   getEmployerApplications,        // ✅ ADD THIS
+  getEmployerApplicationStats,    // ✅ ADD THIS
   getApplicationById,
   updateApplicationStatus,
   withdrawApplication,
@@ -24,6 +26,31 @@ const {
   authorize
 } = require('../middleware/auth.middleware');
 
+// ============================================
+// OPTIMIZED EMPLOYER ROUTES (ADD THESE FIRST!)
+// ============================================
+
+/**
+ * Get ALL applications for employer's jobs (OPTIMIZED - Single query)
+ * GET /api/v1/applications/employer-applications?page=1&limit=100&status=pending
+ */
+router.get(
+  '/employer-applications',
+  authenticate,
+  authorize('employer'),
+  getEmployerApplications  // ✅ NEW optimized endpoint
+);
+
+/**
+ * Get application statistics for employer (OPTIMIZED)
+ * GET /api/v1/applications/employer-stats
+ */
+router.get(
+  '/employer-stats',
+  authenticate,
+  authorize('employer'),
+  getEmployerApplicationStats  // ✅ NEW optimized stats
+);
 // ============================================
 // JOB SEEKER ROUTES
 // ============================================

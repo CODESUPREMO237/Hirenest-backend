@@ -67,6 +67,8 @@ try {
   console.log('  ✓ payment routes');
   const reviewRoutes = require('./routes/reviewRoutes'); 
   console.log('  ✓ review routes');
+  const notificationRoutes = require('./routes/notification.routes');
+  console.log('  ✓ notification routes ');
   console.log('✅ Step 4: All routes loaded');
 } catch (error) {
   console.error('❌ Failed at Step 4 (routes):', error.message);
@@ -123,6 +125,8 @@ const reviewRoutes = require('./routes/reviewRoutes');
 const { errorHandler } = require('./middleware/error.middleware');
 const { rateLimiter } = require('./middleware/rateLimiter.middleware');
 const { initializeSocketHandlers } = require('./socket/socket.handlers');
+const notificationRoutes = require('./routes/notification.routes');
+
 
 const app = express();
 const server = http.createServer(app);
@@ -336,6 +340,10 @@ console.log('    ✓ Review routes registered at /api/v1/reviews');
 
   console.log('    reviewRoutes type:', typeof reviewRoutes, reviewRoutes.constructor?.name);
 
+console.log('  → Registering notification routes...');
+console.log('    notificationRoutes type:', typeof notificationRoutes, notificationRoutes.constructor?.name);
+app.use(`/api/${API_VERSION}/notifications`, notificationRoutes);
+console.log('  ✓ notification routes registered');
 
 
   // 404 handler

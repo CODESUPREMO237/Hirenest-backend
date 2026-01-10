@@ -1,6 +1,6 @@
 // controllers/reviewController.js
 
-const mongoose = require('mongoose'); // ✅ ADDED: Import mongoose
+const mongoose = require('mongoose');
 const Review = require('../models/Review');
 const User = require('../models/User');
 const logger = require('../config/logger');
@@ -12,7 +12,7 @@ const logger = require('../config/logger');
 exports.createReview = async (req, res) => {
   try {
     const { jobId, revieweeId, rating, comment } = req.body;
-    const reviewerId = req.user._id; // ✅ FIX: Use _id instead of id
+    const reviewerId = req.user._id;
 
     // Validation
     if (!jobId || !revieweeId || !rating) {
@@ -30,6 +30,20 @@ exports.createReview = async (req, res) => {
       });
     }
 
+    // ✅ FIX: Check for duplicate review (same reviewer, job, reviewee)
+    const existingReview = await Review.findOne({
+      job: jobId,
+      reviewer: reviewerId,
+      reviewee: revieweeId
+    });
+
+    if (existingReview) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'You have already reviewed this person for this job'
+      });
+    }
+
     // Check if reviewee exists
     const reviewee = await User.findById(revieweeId);
     if (!reviewee) {
@@ -39,7 +53,7 @@ exports.createReview = async (req, res) => {
       });
     }
 
-    // 1. Create the review
+    // Create the review
     const review = await Review.create({
       job: jobId,
       reviewer: reviewerId,
@@ -50,7 +64,7 @@ exports.createReview = async (req, res) => {
 
     logger.info(`Review created: ${review._id} by ${reviewerId} for ${revieweeId}`);
 
-    // 2. Aggregate average rating for the reviewee
+    // Aggregate average rating for the reviewee
     const stats = await Review.aggregate([
       { 
         $match: { 
@@ -66,8 +80,7 @@ exports.createReview = async (req, res) => {
       }
     ]);
 
-    // 3. Update User profile with new stats
-    // ✅ FIX: Handle case when stats array is empty
+    // Update User profile with new stats
     if (stats.length > 0) {
       await User.findByIdAndUpdate(revieweeId, {
         ratingsAverage: stats[0].avgRating,
@@ -75,8 +88,6 @@ exports.createReview = async (req, res) => {
       });
 
       logger.info(`Updated ratings for user ${revieweeId}: avg=${stats[0].avgRating.toFixed(2)}, count=${stats[0].count}`);
-    } else {
-      logger.warn(`No stats found for user ${revieweeId} after review creation`);
     }
 
     // Populate the review before sending response
@@ -92,14 +103,6 @@ exports.createReview = async (req, res) => {
     });
 
   } catch (err) {
-    // Handle duplicate review error (unique index violation)
-    if (err.code === 11000) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'You have already reviewed this job'
-      });
-    }
-
     logger.error('Error creating review:', err);
     res.status(500).json({
       status: 'error',
@@ -181,6 +184,38 @@ exports.getJobReviews = async (req, res) => {
 };
 
 /**
+ * ✅ NEW: Check if current user has already reviewed a specific reviewee for a job
+ * GET /api/v1/reviews/check/:jobId/:revieweeId
+ */
+exports.checkUserReview = async (req, res) => {
+  try {
+    const { jobId, revieweeId } = req.params;
+    const reviewerId = req.user._id;
+
+    logger.info(`Checking review: Job=${jobId}, Reviewer=${reviewerId}, Reviewee=${revieweeId}`);
+
+    const existingReview = await Review.findOne({
+      job: jobId,
+      reviewer: reviewerId,
+      reviewee: revieweeId
+    });
+
+    res.status(200).json({
+      status: 'success',
+      hasReviewed: !!existingReview
+    });
+    
+  } catch (err) {
+    logger.error('Error checking review status:', err);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error checking review status',
+      hasReviewed: false
+    });
+  }
+};
+
+/**
  * Delete a review (reviewer only)
  * DELETE /api/v1/reviews/:reviewId
  */
@@ -220,7 +255,6 @@ exports.deleteReview = async (req, res) => {
         ratingsQuantity: stats[0].count
       });
     } else {
-      // No reviews left, reset to zero
       await User.findByIdAndUpdate(review.reviewee, {
         ratingsAverage: 0,
         ratingsQuantity: 0
@@ -238,35 +272,6 @@ exports.deleteReview = async (req, res) => {
       status: 'error',
       message: 'Error deleting review',
       error: err.message
-    });
-  }
-};
-
-/**
- * Check if the authenticated user has already reviewed a specific job
- * GET /api/v1/reviews/check/:jobId
- */
-exports.checkUserReview = async (req, res) => {
-  try {
-    const { jobId } = req.params;
-    const reviewerId = req.user._id;
-
-    const existingReview = await Review.findOne({
-      job: jobId,
-      reviewer: reviewerId
-    });
-
-    res.status(200).json({
-      status: 'success',
-      hasReviewed: !!existingReview // Returns true if review exists, false otherwise
-    });
-    
-  } catch (err) {
-    logger.error('Error checking review status:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error checking review status',
-      hasReviewed: false // Default to false on error to avoid locking UI
     });
   }
 };

@@ -13,8 +13,14 @@ const {
   sendApplicationStatusEmail 
 } = require('../services/email.service');
 
+// ✅ IMPORT NOTIFICATION SERVICE
+const { 
+  notifyNewApplication,
+  notifyApplicationStatus 
+} = require('../services/notification.service');
+
 /**
- * Apply to a job (Job Seekers only) - FIXED VERSION
+ * Apply to a job (Job Seekers only) - WITH PUSH NOTIFICATIONS
  */
 const applyToJob = async (req, res) => {
   try {
@@ -149,15 +155,16 @@ const applyToJob = async (req, res) => {
     });
     logger.info(`User appliedJobs count incremented for user ${userId}`);
 
-    // BACKGROUND NOTIFICATIONS
+   // BACKGROUND NOTIFICATIONS (EMAIL + PUSH)
     setImmediate(async () => {
       try {
         const jobTitle = application.job.title;
         const applicantName = user.profile.displayName || user.profile.firstName;
+        const employerId = application.job.postedBy._id;
         const employerEmail = application.job.postedBy.email;
         const employerName = application.job.postedBy.profile?.firstName || 'Employer';
 
-        // Notify Applicant
+        // Send Email to Applicant
         await sendApplicationReceivedEmail(
           user.email,
           applicantName,
@@ -165,17 +172,24 @@ const applyToJob = async (req, res) => {
           application.job.companyName || 'the company'
         );
 
-        // Notify Employer
+        // Send Email to Employer
         await sendNewApplicationNotification(
           employerEmail,
           employerName,
           applicantName,
           jobTitle
         );
+
+        // ✅ SEND PUSH NOTIFICATION TO EMPLOYER
+        await notifyNewApplication(
+          employerId,
+          jobTitle,
+          applicantName
+        );
         
-        logger.info(`Application emails sent for Job: ${jobId}`);
+        logger.info(`Application notifications sent for Job: ${jobId}`);
       } catch (err) {
-        logger.error('Error in application background emails:', err);
+        logger.error('Error in application background notifications:', err);
       }
     }); 
 
@@ -199,16 +213,7 @@ const applyToJob = async (req, res) => {
   }
 };
 
-/**
- * Get my applications (Job Seeker only)
- * Route: GET /my-applications
- * ✅ NEW FUNCTION - For job seekers to get their own applications
- */
-/**
- * Get my applications (Job Seeker only)
- * Route: GET /my-applications
- * ✅ FIXED VERSION - Properly populates job with employer details
- */
+
 /**
  * Get my applications (Job Seeker only)
  * Route: GET /my-applications
@@ -452,7 +457,7 @@ const getApplicationById = async (req, res) => {
 };
 
 /**
- * Update application status (Employer only)
+ * Update application status (Employer only) - WITH PUSH NOTIFICATIONS
  */
 const updateApplicationStatus = async (req, res) => {
   try {
@@ -493,17 +498,33 @@ const updateApplicationStatus = async (req, res) => {
 
     await application.save();
 
-    // BACKGROUND NOTIFICATION: Notify applicant of status change
+   
+    // BACKGROUND NOTIFICATION (EMAIL + PUSH)
     setImmediate(async () => {
       try {
+        const applicantId = application.applicant._id;
+        const applicantEmail = application.applicant.email;
+        const applicantName = application.applicant.profile.firstName || 'User';
+        const jobTitle = application.job.title;
+
+        // Send Email
         await sendApplicationStatusEmail(
-          application.applicant.email,
-          application.applicant.profile.firstName || 'User',
-          application.job.title,
+          applicantEmail,
+          applicantName,
+          jobTitle,
           status
         );
+
+        // ✅ SEND PUSH NOTIFICATION TO APPLICANT
+        await notifyApplicationStatus(
+          applicantId,
+          jobTitle,
+          status
+        );
+
+        logger.info(`Status update notifications sent for application ${id}`);
       } catch (err) {
-        logger.error('Status update email failed:', err);
+        logger.error('Status update notification failed:', err);
       }
     });
 
@@ -582,7 +603,7 @@ const withdrawApplication = async (req, res) => {
 };
 
 /**
- * Schedule interview (Employer only)
+ * Schedule interview (Employer only) - WITH PUSH NOTIFICATIONS
  */
 const scheduleInterview = async (req, res) => {
   try {
@@ -610,17 +631,32 @@ const scheduleInterview = async (req, res) => {
 
     await application.addInterview(interviewData);
 
-    // BACKGROUND NOTIFICATION
+    // BACKGROUND NOTIFICATION (EMAIL + PUSH)
     setImmediate(async () => {
       try {
+        const applicantId = application.applicant._id;
+        const applicantEmail = application.applicant.email;
+        const applicantName = application.applicant.profile.firstName || 'User';
+        const jobTitle = application.job.title;
+
+        // Send Email
         await sendApplicationStatusEmail(
-          application.applicant.email,
-          application.applicant.profile.firstName || 'User',
-          application.job.title,
+          applicantEmail,
+          applicantName,
+          jobTitle,
           'interviewing'
         );
+
+        // ✅ SEND PUSH NOTIFICATION
+        await notifyApplicationStatus(
+          applicantId,
+          jobTitle,
+          'interviewing'
+        );
+
+        logger.info(`Interview notifications sent for application ${id}`);
       } catch (err) {
-        logger.error('Interview email failed:', err);
+        logger.error('Interview notification failed:', err);
       }
     });
     
@@ -639,7 +675,7 @@ const scheduleInterview = async (req, res) => {
 };
 
 /**
- * Reject application (Employer only)
+ * Reject application (Employer only) - WITH PUSH NOTIFICATIONS
  */
 const rejectApplication = async (req, res) => {
   try {
@@ -670,6 +706,22 @@ const rejectApplication = async (req, res) => {
 
     await application.save();
 
+     // BACKGROUND NOTIFICATION (PUSH)
+    setImmediate(async () => {
+      try {
+        // ✅ SEND PUSH NOTIFICATION
+        await notifyApplicationStatus(
+          application.applicant._id,
+          application.job.title,
+          'rejected'
+        );
+
+        logger.info(`Rejection notification sent for application ${id}`);
+      } catch (err) {
+        logger.error('Rejection notification failed:', err);
+      }
+    });
+
     res.status(200).json({
       status: 'success',
       message: 'Application rejected',
@@ -685,7 +737,7 @@ const rejectApplication = async (req, res) => {
 };
 
 /**
- * Shortlist application (Employer only)
+ * Shortlist application (Employer only) - WITH PUSH NOTIFICATIONS
  */
 const shortlistApplication = async (req, res) => {
   try {
@@ -709,6 +761,22 @@ const shortlistApplication = async (req, res) => {
     }
 
     await application.updateStatus('shortlisted');
+
+    // BACKGROUND NOTIFICATION (PUSH)
+    setImmediate(async () => {
+      try {
+        // ✅ SEND PUSH NOTIFICATION
+        await notifyApplicationStatus(
+          application.applicant._id,
+          application.job.title,
+          'shortlisted'
+        );
+
+        logger.info(`Shortlist notification sent for application ${id}`);
+      } catch (err) {
+        logger.error('Shortlist notification failed:', err);
+      }
+    });
 
     res.status(200).json({
       status: 'success',
@@ -811,6 +879,173 @@ const getApplicationStats = async (req, res) => {
   }
 };
 
+
+/**
+ * Get all applications for jobs posted by the employer (OPTIMIZED)
+ * @route GET /api/v1/applications/employer-applications
+ * @access Private (Employer only)
+ */
+const getEmployerApplications = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 100, status } = req.query;
+    const employerId = req.user._id;
+
+    console.log('📋 [getEmployerApplications] Starting...');
+    console.log(`   Employer: ${employerId}`);
+    console.log(`   Page: ${page}, Limit: ${limit}, Status: ${status || 'all'}`);
+
+    // Step 1: Find all job IDs posted by this employer
+    const jobs = await Job.find({ postedBy: employerId })
+      .select('_id')
+      .lean();
+
+    const jobIds = jobs.map(job => job._id);
+
+    console.log(`   Found ${jobIds.length} jobs posted by employer`);
+
+    if (jobIds.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          applications: [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: 0,
+            pages: 0,
+          },
+        },
+      });
+    }
+
+    // Step 2: Build query
+    const query = { job: { $in: jobIds } };
+    if (status) {
+      query.status = status;
+    }
+
+    // Step 3: Count total
+    const total = await Application.countDocuments(query);
+
+    // Step 4: Get applications with full population
+    const applications = await Application.find(query)
+      .populate({
+        path: 'job',
+        select: 'title company location employmentType salary postedBy',
+      })
+      .populate({
+        path: 'applicant',
+        select: 'email profile jobSeekerProfile',
+        populate: {
+          path: 'profile',
+          select: 'firstName lastName displayName avatar phone location',
+        },
+      })
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit))
+      .lean();
+
+    console.log(`✅ [getEmployerApplications] Returning ${applications.length} applications`);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        applications,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('❌ [getEmployerApplications] Error:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get application statistics for employer (OPTIMIZED)
+ * @route GET /api/v1/applications/employer-stats
+ * @access Private (Employer only)
+ */
+const getEmployerApplicationStats = async (req, res, next) => {
+  try {
+    const employerId = req.user._id;
+
+    console.log('📊 [getEmployerApplicationStats] Starting...');
+    console.log(`   Employer: ${employerId}`);
+
+    // Step 1: Find all job IDs
+    const jobs = await Job.find({ postedBy: employerId })
+      .select('_id')
+      .lean();
+
+    const jobIds = jobs.map(job => job._id);
+
+    console.log(`   Found ${jobIds.length} jobs`);
+
+    if (jobIds.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          stats: {
+            total: 0,
+            pending: 0,
+            reviewing: 0,
+            interviewing: 0,
+            shortlisted: 0,
+            rejected: 0,
+            accepted: 0,
+          },
+        },
+      });
+    }
+
+    // Step 2: Aggregate statistics
+    const stats = await Application.aggregate([
+      { $match: { job: { $in: jobIds } } },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Step 3: Format stats
+    const formattedStats = {
+      total: 0,
+      pending: 0,
+      reviewing: 0,
+      interviewing: 0,
+      shortlisted: 0,
+      rejected: 0,
+      accepted: 0,
+    };
+
+    stats.forEach(stat => {
+      const status = stat._id.toLowerCase();
+      if (formattedStats.hasOwnProperty(status)) {
+        formattedStats[status] = stat.count;
+      }
+      formattedStats.total += stat.count;
+    });
+
+    console.log('✅ [getEmployerApplicationStats] Stats:', formattedStats);
+
+    res.status(200).json({
+      status: 'success',
+      data: { stats: formattedStats },
+    });
+  } catch (error) {
+    console.error('❌ [getEmployerApplicationStats] Error:', error);
+    next(error);
+  }
+};
+
 // ✅ COMPLETE EXPORTS - All functions included
 module.exports = {
   applyToJob,
@@ -822,5 +1057,7 @@ module.exports = {
   scheduleInterview,
   rejectApplication,
   shortlistApplication,
-  getApplicationStats
+  getApplicationStats,
+  getEmployerApplications,
+  getEmployerApplicationStats
 };

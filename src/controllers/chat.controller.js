@@ -4,6 +4,8 @@ const User = require('../models/User');
 const logger = require('../config/logger');
 const Message = require('../models/Message');
 const { sendNewMessageEmail } = require('../services/email.service');
+const { notifyNewMessage } = require('../services/notification.service');
+
 
 /**
  * Get all my chats
@@ -244,7 +246,7 @@ const getChatMessages = async (req, res) => {
 };
 
 /**
- * Send message (REST endpoint - fallback for Socket.IO)
+ * Send message (REST endpoint - fallback for Socket.IO) WITH PUSH NOTIFICATIONS
  */
 const sendMessage = async (req, res) => {
   try {
@@ -306,35 +308,43 @@ const sendMessage = async (req, res) => {
       data: { message }
     });
 
-    // 6. Debounced Background Notification (5-minute delay)
+     // DEBOUNCED NOTIFICATIONS (EMAIL + PUSH) - 5 minute delay
     if (recipientUser) {
       setTimeout(async () => {
         try {
-          // RE-FETCH the chat and recipient to see if they read it during the 5 mins
           const freshChat = await Chat.findById(id);
           const freshRecipient = await User.findById(recipientUser._id);
           
-          if (!freshChat || !freshRecipient) {
-            return;
-          }
+          if (!freshChat || !freshRecipient) return;
 
           const participantData = freshChat.participants.find(
             p => p.user.toString() === recipientUser._id.toString()
           );
 
-          // ONLY send email if they still have unread messages in THIS chat
           if (participantData && participantData.unreadCount > 0) {
+            // Send Email
+             const messageUrl = `${process.env.APP_URL || process.env.CLIENT_URL}messages/${id}`;
+            
+            // Send Email
             await sendNewMessageEmail(
               freshRecipient.email,
               freshRecipient.profile.firstName || 'User',
               req.user.profile.displayName || 'A user',
               `You have ${participantData.unreadCount} new messages.`,
-              `https://your-app-url.com/messages/${id}`
+              messageUrl
             );
-            logger.info(`Debounced email sent to ${freshRecipient.email} for chat ${id}`);
+
+            // ✅ SEND PUSH NOTIFICATION
+            await notifyNewMessage(
+              freshRecipient._id,
+              req.user.profile.displayName || req.user.profile.firstName || 'Someone',
+              id
+            );
+
+            logger.info(`Debounced notifications sent for chat ${id}`);
           }
         } catch (err) {
-          logger.error('Error in debounced email worker:', err);
+          logger.error('Error in debounced notification worker:', err);
         }
       }, 5 * 60 * 1000); // 5 Minutes
     }

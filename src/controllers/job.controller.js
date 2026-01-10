@@ -1,4 +1,4 @@
-// Job Controller - COMPLETE WITH VIEW TRACKING & APPLICATION COUNTS
+// Job Controller - COMPLETE WITH VIEW TRACKING & APPLICATION COUNTS & PUSH NOTIFICATIONS
 // controllers/job.controller.js
 // Copy and paste this entire file
 
@@ -8,8 +8,14 @@ const User = require('../models/User');
 const Company = require('../models/Company');
 const logger = require('../config/logger');
 
+// ✅ IMPORT NOTIFICATION SERVICE
+const { 
+  notifyNewJobPosted, 
+  notifyApplicationStatus 
+} = require('../services/notification.service');
+
 /**
- * Create new job posting (Employers only)
+ * Create new job posting (Employers only) - WITH PUSH NOTIFICATIONS
  */
 const createJob = async (req, res) => {
   try {
@@ -45,6 +51,25 @@ const createJob = async (req, res) => {
     // Populate references
     await job.populate('company postedBy');
 
+    // BACKGROUND NOTIFICATION (PUSH TO TOPIC)
+    if (job.status === 'active') {
+      setImmediate(async () => {
+        try {
+          // ✅ SEND PUSH NOTIFICATION TO JOB SEEKERS
+          await notifyNewJobPosted(
+            job.title,
+            employer.employerProfile.company.name,
+            job.category,
+            job._id.toString()
+          );
+
+          logger.info(`New job notification sent for job ${job._id}`);
+        } catch (err) {
+          logger.error('New job notification failed:', err);
+        }
+      });
+    }
+
     res.status(201).json({
       status: 'success',
       message: 'Job posted successfully',
@@ -60,9 +85,6 @@ const createJob = async (req, res) => {
   }
 };
 
-/**
- * Get all jobs with filters
- */
 /**
  * Get all jobs with filters
  */
@@ -194,8 +216,8 @@ const getAllJobs = async (req, res) => {
   }
 };
 
-    /**
- * Get single job by ID with proper view tracking (DEBUG VERSION)
+/**
+ * Get single job by ID with proper view tracking
  */
 const getJobById = async (req, res) => {
   try {
@@ -461,7 +483,7 @@ const getMyJobs = async (req, res) => {
 };
 
 /**
- * Change job status (pause, activate, close)
+ * Change job status (pause, activate, close) - WITH PUSH NOTIFICATIONS
  */
 const changeJobStatus = async (req, res) => {
   try {
@@ -498,6 +520,30 @@ const changeJobStatus = async (req, res) => {
 
     if (status === 'closed' || status === 'filled') {
       job.closedAt = new Date();
+
+      // ✅ NOTIFY APPLICANTS ABOUT JOB CLOSURE/FILLED
+      setImmediate(async () => {
+        try {
+          const applications = await Application.find({
+            job: id,
+            status: { $in: ['pending', 'reviewing', 'shortlisted'] },
+            deletedAt: null
+          }).populate('applicant');
+
+          for (const application of applications) {
+            // ✅ SEND PUSH NOTIFICATION TO EACH APPLICANT
+            await notifyApplicationStatus(
+              application.applicant._id,
+              job.title,
+              status === 'filled' ? 'position_filled' : 'position_closed'
+            );
+          }
+
+          logger.info(`Job closure notifications sent for job ${id}`);
+        } catch (err) {
+          logger.error('Job closure notification failed:', err);
+        }
+      });
     }
 
     await job.save();

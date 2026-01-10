@@ -1,21 +1,28 @@
+// routes/review.routes.js
+
 const express = require('express');
 const router = express.Router();
 const { 
   createReview, 
   getUserReviews, 
   getJobReviews, 
-  deleteReview ,
+  deleteReview,
   checkUserReview
 } = require('../controllers/reviewController');
 
-// ✅ FIX: Use 'authenticate' instead of 'protect'
 const { authenticate } = require('../middleware/auth.middleware');
 
-// Routes
-router.get('/check/:jobId', authenticate, checkUserReview); // ✅ ADD THIS LINE
-router.post('/', authenticate, createReview); // Changed from protect to authenticate
+// ✅ FIX: Updated route to accept both jobId and revieweeId
+router.get('/check/:jobId/:revieweeId', authenticate, checkUserReview);
+
+// Create review
+router.post('/', authenticate, createReview);
+
+// Get reviews
 router.get('/user/:userId', getUserReviews);
 router.get('/job/:jobId', getJobReviews);
-router.delete('/:reviewId', authenticate, deleteReview); // Changed from protect to authenticate
+
+// Delete review
+router.delete('/:reviewId', authenticate, deleteReview);
 
 module.exports = router;

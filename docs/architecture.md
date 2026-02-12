@@ -1,22 +1,17 @@
 ﻿# Architecture
 
-This project follows clean architecture principles.
+This codebase follows clean architecture to separate business rules from delivery and infrastructure concerns.
 
 ## Layers
-- Domain: core entities and business rules.
-- Application: use-cases and orchestration.
-- Infrastructure: external integrations and adapters.
-- Interface: controllers/UI/api handlers.
+- Domain: business entities and core rules.
+- Application: use cases and orchestration logic.
+- Infrastructure: database, external APIs, framework adapters.
+- Interfaces: controllers, routes, views, serializers, or UI entry points.
 
-## Suggested Structure
-- src/domain
-- src/application
-- src/infrastructure
-- src/interfaces
-- tests/unit
-- tests/integration
+## Test Strategy
+- Unit tests validate isolated business logic.
+- Integration tests validate module boundaries and external interactions.
 
-## Quality Gates
-- Linting via ESLint.
-- Unit and integration tests via Vitest.
-- Containerization with Docker.
+## Tooling
+- Linting enforces code consistency and baseline quality.
+- Docker enables reproducible local and deployment runtime.

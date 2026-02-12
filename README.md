@@ -285,3 +285,6 @@ For support, email jobconnect@support.com or open an issue on GitHub.
 ---
 
 Made with ❤️ using Flutter & Node.js
+## Architecture
+See [docs/architecture.md](docs/architecture.md) for clean architecture layers, folder structure, testing strategy, and Docker guidance.
+

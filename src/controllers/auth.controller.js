@@ -168,8 +168,36 @@ const socialAuth = async (req, res) => {
       });
     }
 
-    // Verify Firebase token
-    const decodedToken = await verifyIdToken(idToken);
+    // Verify the Google ID token directly via Google's tokeninfo endpoint
+    // (idToken is a raw Google ID token, not a Firebase token)
+    let decodedToken;
+    try {
+      const googleResponse = await axios.get(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`
+      );
+      const googleData = googleResponse.data;
+
+      // Validate audience matches our client ID
+      const expectedClientId = process.env.GOOGLE_SERVER_CLIENT_ID;
+      if (expectedClientId && googleData.aud !== expectedClientId) {
+        return res.status(401).json({ status: 'error', message: 'Invalid Google token audience' });
+      }
+
+      // Map Google token fields to match Firebase decoded token shape
+      decodedToken = {
+        uid: googleData.sub,
+        email: googleData.email,
+        email_verified: googleData.email_verified === 'true',
+        name: googleData.name,
+        given_name: googleData.given_name,
+        family_name: googleData.family_name,
+        picture: googleData.picture,
+        user_id: googleData.sub,
+      };
+    } catch (googleErr) {
+      logger.error('Google token verification failed:', googleErr.response?.data || googleErr.message);
+      return res.status(401).json({ status: 'error', message: 'Invalid Google ID token' });
+    }
     
     // Try to find existing user
     let user = await User.findOne({ firebaseUid: decodedToken.uid });

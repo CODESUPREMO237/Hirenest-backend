@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: hirenest-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node --openssl-legacy-provider src/server.js
+    envVars:
+      - key: NODE_OPTIONS
+        value: --openssl-legacy-provider

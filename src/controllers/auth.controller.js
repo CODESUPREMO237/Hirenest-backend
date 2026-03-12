@@ -744,11 +744,271 @@ const checkEmailAvailability = async (req, res) => {
   }
 };
 
+// ============================================================================
+// GitHub OAuth Exchange
+// ============================================================================
+const githubExchange = async (req, res) => {
+  try {
+    const { code } = req.body;
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      return res.status(500).json({ status: 'error', message: 'GitHub OAuth not configured' });
+    }
+
+    // Exchange code for access token
+    const tokenResponse = await axios.post(
+      'https://github.com/login/oauth/access_token',
+      { client_id: clientId, client_secret: clientSecret, code },
+      { headers: { Accept: 'application/json' } }
+    );
+
+    const { access_token, error: ghError } = tokenResponse.data;
+    if (ghError || !access_token) {
+      return res.status(400).json({ status: 'error', message: ghError || 'Failed to get GitHub access token' });
+    }
+
+    // Get GitHub user info
+    const [userResponse, emailResponse] = await Promise.all([
+      axios.get('https://api.github.com/user', { headers: { Authorization: `Bearer ${access_token}` } }),
+      axios.get('https://api.github.com/user/emails', { headers: { Authorization: `Bearer ${access_token}` } })
+    ]);
+
+    const githubUser = userResponse.data;
+    const emails = emailResponse.data;
+    const primaryEmail = emails.find(e => e.primary && e.verified)?.email || emails[0]?.email;
+
+    if (!primaryEmail) {
+      return res.status(400).json({ status: 'error', message: 'No verified email found on GitHub account' });
+    }
+
+    // Find or create user
+    let user = await User.findOne({ email: primaryEmail });
+    const isNewUser = !user;
+
+    if (isNewUser) {
+      const nameParts = (githubUser.name || githubUser.login || '').split(' ');
+      const firebaseUser = await admin.auth().createUser({
+        email: primaryEmail,
+        displayName: githubUser.name || githubUser.login,
+        photoURL: githubUser.avatar_url,
+        emailVerified: true
+      });
+
+      user = await User.create({
+        firebaseUid: firebaseUser.uid,
+        email: primaryEmail,
+        role: 'jobseeker',
+        isEmailVerified: true,
+        authProviders: ['github'],
+        profile: {
+          firstName: nameParts[0] || githubUser.login,
+          lastName: nameParts.slice(1).join(' ') || '',
+          displayName: githubUser.name || githubUser.login,
+          avatar: { url: githubUser.avatar_url }
+        }
+      });
+
+      await setCustomUserClaims(firebaseUser.uid, { role: 'jobseeker', userId: user._id.toString() });
+    } else {
+      if (!user.authProviders.includes('github')) {
+        user.authProviders.push('github');
+        await user.save();
+      }
+    }
+
+    const tokens = generateTokenPair(user._id, user.role, user.email);
+    const firebaseToken = await admin.auth().createCustomToken(user.firebaseUid, {
+      role: user.role,
+      userId: user._id.toString()
+    });
+
+    logger.info(`GitHub auth successful: ${user.email}`);
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          profile: user.profile,
+          isEmailVerified: user.isEmailVerified
+        },
+        tokens,
+        firebaseToken,
+        isNewUser
+      }
+    });
+  } catch (error) {
+    logger.error('GitHub exchange error:', error);
+    return res.status(500).json({ status: 'error', message: 'GitHub authentication failed' });
+  }
+};
+
+// ============================================================================
+// Microsoft OAuth Exchange (with PKCE)
+// ============================================================================
+const microsoftExchange = async (req, res) => {
+  try {
+    const { code, codeVerifier, redirectUri } = req.body;
+    const clientId = process.env.MICROSOFT_CLIENT_ID;
+    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+
+    if (!clientId || !clientSecret) {
+      return res.status(500).json({ status: 'error', message: 'Microsoft OAuth not configured' });
+    }
+
+    // Exchange code for tokens using PKCE
+    const params = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: codeVerifier,
+      scope: 'openid profile email User.Read offline_access'
+    });
+
+    const tokenResponse = await axios.post(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      params.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token } = tokenResponse.data;
+
+    // Get Microsoft user info
+    const msUserResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    const msUser = msUserResponse.data;
+    const email = msUser.mail || msUser.userPrincipalName;
+
+    if (!email) {
+      return res.status(400).json({ status: 'error', message: 'No email found on Microsoft account' });
+    }
+
+    // Find or create user
+    let user = await User.findOne({ email });
+    const isNewUser = !user;
+
+    if (isNewUser) {
+      const firebaseUser = await admin.auth().createUser({
+        email,
+        displayName: msUser.displayName,
+        emailVerified: true
+      });
+
+      user = await User.create({
+        firebaseUid: firebaseUser.uid,
+        email,
+        role: 'jobseeker',
+        isEmailVerified: true,
+        authProviders: ['microsoft'],
+        profile: {
+          firstName: msUser.givenName || msUser.displayName?.split(' ')[0] || '',
+          lastName: msUser.surname || '',
+          displayName: msUser.displayName
+        }
+      });
+
+      await setCustomUserClaims(firebaseUser.uid, { role: 'jobseeker', userId: user._id.toString() });
+    } else {
+      if (!user.authProviders.includes('microsoft')) {
+        user.authProviders.push('microsoft');
+        await user.save();
+      }
+    }
+
+    const tokens = generateTokenPair(user._id, user.role, user.email);
+    const firebaseToken = await admin.auth().createCustomToken(user.firebaseUid, {
+      role: user.role,
+      userId: user._id.toString()
+    });
+
+    logger.info(`Microsoft auth successful: ${user.email}`);
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          profile: user.profile,
+          isEmailVerified: user.isEmailVerified
+        },
+        tokens,
+        firebaseToken,
+        isNewUser
+      }
+    });
+  } catch (error) {
+    logger.error('Microsoft exchange error:', error);
+    return res.status(500).json({ status: 'error', message: 'Microsoft authentication failed' });
+  }
+};
+
+// ============================================================================
+// Link Microsoft Account to existing user
+// ============================================================================
+const linkMicrosoftAccount = async (req, res) => {
+  try {
+    const { code, redirectUri } = req.body;
+    const clientId = process.env.MICROSOFT_CLIENT_ID;
+    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      scope: 'openid profile email User.Read'
+    });
+
+    const tokenResponse = await axios.post(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      params.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token } = tokenResponse.data;
+    const msUserResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    const msUser = msUserResponse.data;
+    const email = msUser.mail || msUser.userPrincipalName;
+
+    // Check if Microsoft account already linked to another user
+    const existingUser = await User.findOne({ email, _id: { $ne: req.user._id } });
+    if (existingUser) {
+      return res.status(400).json({ status: 'error', message: 'This Microsoft account is linked to another user' });
+    }
+
+    if (!req.user.authProviders.includes('microsoft')) {
+      req.user.authProviders.push('microsoft');
+      await req.user.save();
+    }
+
+    return res.status(200).json({ status: 'success', message: 'Microsoft account linked successfully' });
+  } catch (error) {
+    logger.error('Microsoft link error:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to link Microsoft account' });
+  }
+};
+
 module.exports = {
   register, login, logout, refreshToken,
   sendVerificationEmailEndpoint, verifyEmail,
   requestPasswordReset, createGuestSession,
   checkEmailAvailability, socialAuth,
-  githubExchange, microsoftExchange,  
+  githubExchange, microsoftExchange,
   linkMicrosoftAccount
 };

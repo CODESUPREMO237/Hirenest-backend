@@ -208,20 +208,20 @@ try {
   app.use('/uploads', express.static('uploads'));
   console.log('  ✓ static files');
   
-  // ✅ Request debugging middleware
-  app.use((req, res, next) => {
-    console.log(`\n📨 ${req.method} ${req.url}`);
-    console.log(`   Origin: ${req.headers.origin || 'no-origin'}`);
-    console.log(`   Content-Type: ${req.headers['content-type'] || 'not-set'}`);
-    console.log(`   User-Agent: ${req.headers['user-agent']?.substring(0, 50) || 'not-set'}...`);
-    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-      const bodyString = JSON.stringify(req.body);
-      console.log(`   Body size: ${bodyString.length} bytes`);
-      console.log(`   Body preview: ${bodyString.substring(0, 100)}${bodyString.length > 100 ? '...' : ''}`);
-    }
-    next();
-  });
-  console.log('  ✓ debug logging');
+  // Request logging - development only
+  if (process.env.NODE_ENV !== 'production') {
+    app.use((req, res, next) => {
+      console.log(`\n📨 ${req.method} ${req.url}`);
+      console.log(`   Origin: ${req.headers.origin || 'no-origin'}`);
+      console.log(`   Content-Type: ${req.headers['content-type'] || 'not-set'}`);
+      if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+        const bodyString = JSON.stringify(req.body);
+        console.log(`   Body size: ${bodyString.length} bytes`);
+      }
+      next();
+    });
+    console.log('  ✓ debug logging (development only)');
+  }
   
   console.log('✅ Step 9: Middleware configured');
 } catch (error) {

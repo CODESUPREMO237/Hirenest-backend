@@ -199,11 +199,31 @@ const socialAuth = async (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid Google ID token' });
     }
     
-    // Try to find existing user
-    let user = await User.findOne({ firebaseUid: decodedToken.uid });
+    // Try to find existing user by Google UID first, then fall back to email
+    let user = await User.findOne({ firebaseUid: decodedToken.uid })
+              || await User.findOne({ email: decodedToken.email });
     let isNewUser = false;
 
-    // ✅ AUTO-CREATE ACCOUNT if user doesn't exist
+    // If found by email but different firebaseUid, link the Google account
+    if (user && user.firebaseUid !== decodedToken.uid) {
+      logger.info(`Linking Google account to existing user: ${user.email}`);
+      user.firebaseUid = decodedToken.uid;
+      if (!user.socialLogins) user.socialLogins = {};
+      user.socialLogins.google = {
+        id: decodedToken.uid,
+        email: decodedToken.email,
+        displayName: decodedToken.name || user.profile.displayName,
+        profileImage: decodedToken.picture || null,
+        lastLogin: new Date(),
+        linkedAt: new Date(),
+      };
+      user.lastLogin = new Date();
+      user.loginCount = (user.loginCount || 0) + 1;
+      await user.save({ validateBeforeSave: false });
+      logger.info(`Google account linked to existing user: ${user.email}`);
+    }
+
+    // ✅ AUTO-CREATE ACCOUNT if user doesn't exist at all
     if (!user) {
       logger.info(`Creating new account for Google user: ${decodedToken.email}`);
 
@@ -348,28 +368,113 @@ const githubExchange = async (req, res) => {
       email = primaryEmail?.email || emailResponse.data[0]?.email;
     }
 
-    // 3. Find user in MongoDB by email
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Account not found. Please register via email/password first.',
-        code: 'USER_NOT_REGISTERED'
-      });
+    if (!email) {
+      return res.status(400).json({ status: 'error', message: 'Could not retrieve email from GitHub account' });
     }
 
-    user.lastLogin = new Date();
-    user.loginCount += 1;
-    await user.save({ validateBeforeSave: false });
+    const githubId = String(userResponse.data.id);
+    const displayName = userResponse.data.name || userResponse.data.login;
+    const avatar = userResponse.data.avatar_url || null;
+
+    // 3. Find user by GitHub ID or email
+    let user = await User.findOne({ 'socialLogins.github.id': githubId })
+              || await User.findOne({ email });
+    let isNewUser = false;
+
+    if (!user) {
+      // Auto-create account
+      logger.info(`Creating new account for GitHub user: ${email}`);
+
+      let firebaseUser;
+      try {
+        firebaseUser = await admin.auth().getUserByEmail(email);
+      } catch (e) {
+        firebaseUser = await admin.auth().createUser({
+          email,
+          emailVerified: true,
+          displayName,
+          photoURL: avatar,
+        });
+      }
+
+      await setCustomUserClaims(firebaseUser.uid, { role: 'jobseeker' });
+
+      user = await User.create({
+        firebaseUid: firebaseUser.uid,
+        email,
+        role: 'jobseeker',
+        profile: {
+          firstName: displayName.split(' ')[0] || displayName,
+          lastName: displayName.split(' ').slice(1).join(' ') || '',
+          displayName,
+          avatar,
+        },
+        isEmailVerified: true,
+        socialLogins: {
+          github: {
+            id: githubId,
+            email,
+            displayName,
+            profileImage: avatar,
+            lastLogin: new Date(),
+            linkedAt: new Date(),
+          }
+        },
+        jobSeekerProfile: {},
+        marketplaceStats: {
+          productsPosted: 0, activeProducts: 0,
+          totalViews: 0, sellerRating: { average: 0, count: 0 }
+        }
+      });
+
+      isNewUser = true;
+      logger.info(`New GitHub user created: ${user.email}`);
+
+      setImmediate(async () => {
+        try {
+          await sendWelcomeEmail(user.email, displayName.split(' ')[0] || 'User', 'jobseeker');
+        } catch (e) { /* silent */ }
+      });
+    } else {
+      // Link GitHub if not already linked
+      if (!user.socialLogins) user.socialLogins = {};
+      user.socialLogins.github = {
+        id: githubId,
+        email,
+        displayName,
+        profileImage: avatar,
+        lastLogin: new Date(),
+        linkedAt: user.socialLogins.github?.linkedAt || new Date(),
+      };
+      user.lastLogin = new Date();
+      user.loginCount = (user.loginCount || 0) + 1;
+      await user.save({ validateBeforeSave: false });
+      logger.info(`Existing user logged in via GitHub: ${user.email}`);
+    }
 
     const tokens = generateTokenPair(user._id, user.role, user.email);
     const firebaseToken = await admin.auth().createCustomToken(user.firebaseUid);
 
     res.status(200).json({
       status: 'success',
-      message: 'GitHub authentication successful',
-      data: { user, tokens, firebaseToken, isNewUser: false }
+      message: isNewUser ? 'Account created successfully with GitHub' : 'GitHub authentication successful',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          profile: user.profile,
+          firebaseUid: user.firebaseUid,
+          isEmailVerified: user.isEmailVerified,
+          socialLogins: user.socialLogins,
+          marketplaceStats: user.marketplaceStats,
+          ...(user.role === 'jobseeker' && { jobSeekerProfile: user.jobSeekerProfile }),
+          ...(user.role === 'employer' && { employerProfile: user.employerProfile }),
+        },
+        tokens,
+        firebaseToken,
+        isNewUser
+      }
     });
   } catch (error) {
     logger.error('GitHub exchange error:', error);

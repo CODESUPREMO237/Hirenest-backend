@@ -1,5 +1,7 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const logger = require('../config/logger');
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Validate email format
 const isValidEmail = (email) => {
@@ -17,26 +19,6 @@ const sanitizeInput = (input) => {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 };
-
-// Create transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
-
-// Verify transporter configuration
-transporter.verify((error, success) => {
-  if (error) {
-    logger.error('Email transporter error:', error);
-  } else {
-    logger.info('Email server is ready to send messages');
-  }
-});
 
 /**
  * Get current year for footer
@@ -92,17 +74,20 @@ const sendEmail = async (to, subject, html, text = '', retries = 3) => {
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const mailOptions = {
-        from: `JobConnect <${process.env.EMAIL_FROM || process.env.SMTP_USER}>`,
-        to,
+      const { data, error } = await resend.emails.send({
+        from: process.env.EMAIL_FROM || 'onboarding@resend.dev',
+        to: [to],
         subject,
         html,
         text: text || html.replace(/<[^>]*>/g, '') // Strip HTML for text version
-      };
+      });
 
-      const info = await transporter.sendMail(mailOptions);
-      logger.info(`Email sent successfully: ${info.messageId} to ${to}`);
-      return info;
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      logger.info(`Email sent successfully: ${data?.id} to ${to}`);
+      return data;
     } catch (error) {
       logger.error(`Email send attempt ${attempt}/${retries} failed:`, error);
       

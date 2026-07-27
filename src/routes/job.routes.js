@@ -20,8 +20,7 @@ const {
 const {
   authenticate,
   authorize,
-  optionalAuthenticate,
-  checkGuestLimit
+  optionalAuthenticate
 } = require('../middleware/auth.middleware');
 
 const { validate, createJobSchema } = require('../middleware/validation.middleware');
@@ -30,7 +29,7 @@ const { validate, createJobSchema } = require('../middleware/validation.middlewa
 // Public routes - SPECIFIC PATHS FIRST
 router.get('/featured', optionalAuthenticate, getFeaturedJobs);
 router.get('/categories', getCategories);
-router.get('/', optionalAuthenticate, checkGuestLimit('jobsViewed'), getAllJobs);
+router.get('/', optionalAuthenticate, getAllJobs);
 
 // Employer routes - SPECIFIC PATHS FIRST
 router.post('/', authenticate, authorize('employer'), validate(createJobSchema), createJob);
@@ -39,7 +38,7 @@ router.get('/my-jobs', authenticate, authorize('employer'), getMyJobs);
 // Routes with :id parameter - THESE MUST COME LAST!
 router.get('/:id/similar', optionalAuthenticate, getSimilarJobs);
 router.get('/:id/applicants', authenticate, authorize('employer'), getJobApplicants);
-router.get('/:id', optionalAuthenticate, checkGuestLimit('jobsViewed'), getJobById);
+router.get('/:id', optionalAuthenticate, getJobById);
 router.put('/:id', authenticate, authorize('employer'), updateJob);
 router.delete('/:id', authenticate, authorize('employer'), deleteJob);
 router.put('/:id/status', authenticate, authorize('employer'), changeJobStatus);

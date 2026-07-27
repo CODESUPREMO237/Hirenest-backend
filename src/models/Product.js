@@ -228,6 +228,13 @@ const productSchema = new mongoose.Schema({
   soldAt: Date,
   expiresAt: Date,
 
+  // Boosted listing (Phase 9)
+  isBoosted: {
+    type: Boolean,
+    default: false
+  },
+  boostedUntil: Date,
+
   // Soft delete
   deletedAt: {
     type: Date,

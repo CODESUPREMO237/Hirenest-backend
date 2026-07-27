@@ -9,6 +9,11 @@ const Company = require('../models/Company');
 const logger = require('../config/logger');
 const Chat = require('../models/chat');       
 const Message = require('../models/Message');
+const Order = require('../models/Order');
+const DeliveryEvent = require('../models/DeliveryEvent');
+const escrowService = require('../services/escrow.service');
+const auditService = require('../services/audit.service');
+
 /**
  * Get dashboard overview
  */
@@ -148,6 +153,7 @@ const toggleUserBlock = async (req, res) => {
       });
     }
 
+    const wasBlocked = user.isBlocked;
     user.isBlocked = !user.isBlocked;
     if (user.isBlocked) {
       user.blockedReason = reason;
@@ -158,6 +164,18 @@ const toggleUserBlock = async (req, res) => {
     }
 
     await user.save();
+
+    // Audit log
+    await auditService.logAction({
+      actorId: req.user._id,
+      actorEmail: req.user.email,
+      action: user.isBlocked ? 'user.block' : 'user.unblock',
+      targetType: 'User',
+      targetId: user._id,
+      description: `${user.isBlocked ? 'Blocked' : 'Unblocked'} user ${user.email}`,
+      metadata: { reason: reason || null, previousState: wasBlocked },
+      req
+    });
 
     res.status(200).json({
       status: 'success',
@@ -180,9 +198,26 @@ const deleteUser = async (req, res) => {
   try {
     const { userId } = req.params;
 
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ status: 'error', message: 'User not found' });
+    }
+
     await User.findByIdAndUpdate(userId, {
       deletedAt: new Date(),
       isActive: false
+    });
+
+    // Audit log
+    await auditService.logAction({
+      actorId: req.user._id,
+      actorEmail: req.user.email,
+      action: 'user.delete',
+      targetType: 'User',
+      targetId: user._id,
+      description: `Deleted user ${user.email} (${user.profile?.firstName} ${user.profile?.lastName})`,
+      metadata: { email: user.email, role: user.role },
+      req
     });
 
     res.status(200).json({
@@ -224,6 +259,18 @@ const moderateJob = async (req, res) => {
 
     await job.save();
 
+    // Audit log
+    await auditService.logAction({
+      actorId: req.user._id,
+      actorEmail: req.user.email,
+      action: action === 'approve' ? 'job.approve' : 'job.reject',
+      targetType: 'Job',
+      targetId: job._id,
+      description: `${action === 'approve' ? 'Approved' : 'Rejected'} job "${job.title}"`,
+      metadata: { reason: reason || null, jobTitle: job.title },
+      req
+    });
+
     res.status(200).json({
       status: 'success',
       message: `Job ${action}ed successfully`,
@@ -261,6 +308,18 @@ const moderateProduct = async (req, res) => {
     }
 
     await product.save();
+
+    // Audit log
+    await auditService.logAction({
+      actorId: req.user._id,
+      actorEmail: req.user.email,
+      action: 'product.moderate',
+      targetType: 'Product',
+      targetId: product._id,
+      description: `Moderated product "${product.name}" — ${action}`,
+      metadata: { reason: reason || null, productName: product.name, moderationAction: action },
+      req
+    });
 
     res.status(200).json({
       status: 'success',
@@ -303,7 +362,130 @@ const getReportedContent = async (req, res) => {
   }
 };
 
-// Export only admin functions
+/**
+ * Get all disputed orders (with dispute reason from DeliveryEvent)
+ */
+const getDisputedOrders = async (req, res) => {
+  try {
+    const disputedOrders = await Order.find({ status: 'DISPUTED' })
+      .populate('buyer', 'profile email')
+      .populate('seller', 'profile email')
+      .populate('product', 'name images price')
+      .sort({ updatedAt: -1 });
+
+    // Fetch the DeliveryEvent that caused the dispute for each order
+    const orderIds = disputedOrders.map(o => o._id);
+    const disputeEvents = await DeliveryEvent.find({
+      order: { $in: orderIds },
+      eventType: { $in: ['buyer_rejected_item', 'dispute_opened'] }
+    }).sort({ createdAt: -1 });
+
+    // Build a map: orderId -> most recent dispute event
+    const eventsByOrder = {};
+    for (const event of disputeEvents) {
+      const key = event.order.toString();
+      if (!eventsByOrder[key]) {
+        eventsByOrder[key] = event;
+      }
+    }
+
+    // Attach disputeReason to each order
+    const ordersWithReason = disputedOrders.map(order => {
+      const orderObj = order.toObject();
+      const event = eventsByOrder[order._id.toString()];
+      orderObj.disputeReason = event?.metadata?.reason || event?.metadata?.declineReason || 'No reason provided';
+      orderObj.disputeEventType = event?.eventType || null;
+      orderObj.disputeDate = event?.createdAt || order.updatedAt;
+      return orderObj;
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: { disputedOrders: ordersWithReason }
+    });
+  } catch (error) {
+    logger.error('Error fetching disputed orders:', error);
+    res.status(500).json({ status: 'error', message: 'Error fetching disputed orders' });
+  }
+};
+
+/**
+ * Resolve a dispute
+ */
+const resolveDispute = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resolution, reason } = req.body; // 'buyer' or 'seller'
+    const adminId = req.user._id.toString();
+
+    if (!['buyer', 'seller'].includes(resolution)) {
+      return res.status(400).json({ status: 'error', message: "Resolution must be 'buyer' or 'seller'." });
+    }
+
+    const order = await Order.findById(id);
+    if (!order || order.status !== 'DISPUTED') {
+      return res.status(404).json({ status: 'error', message: 'Disputed order not found.' });
+    }
+
+    let resultOrder;
+    if (resolution === 'buyer') {
+      // Refund buyer
+      resultOrder = await escrowService.refundBuyer(id, `admin:${adminId}`, reason);
+    } else {
+      // Release funds to seller — uses dedicated method, no status flip needed
+      resultOrder = await escrowService.resolveDisputeToSeller(id, `admin:${adminId}`, reason);
+    }
+
+    // Audit log
+    await auditService.logAction({
+      actorId: req.user._id,
+      actorEmail: req.user.email,
+      action: resolution === 'buyer' ? 'dispute.resolve_buyer' : 'dispute.resolve_seller',
+      targetType: 'Order',
+      targetId: order._id,
+      description: `Resolved dispute on order ${order.orderNumber} in favor of ${resolution}`,
+      metadata: { resolution, reason, orderNumber: order.orderNumber, amount: order.pricing?.productPrice },
+      req
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: `Dispute resolved in favor of ${resolution}.`,
+      data: { order: resultOrder }
+    });
+  } catch (error) {
+    logger.error('Error resolving dispute:', error);
+    res.status(500).json({ status: 'error', message: 'Error resolving dispute.' });
+  }
+};
+
+/**
+ * Get audit logs (admin only)
+ */
+const getAuditLogs = async (req, res) => {
+  try {
+    const { action, targetType, startDate, endDate, page = 1, limit = 50 } = req.query;
+
+    const result = await auditService.getLogs({
+      action,
+      targetType,
+      startDate,
+      endDate,
+      page,
+      limit
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: result
+    });
+  } catch (error) {
+    logger.error('Error fetching audit logs:', error);
+    res.status(500).json({ status: 'error', message: 'Error fetching audit logs' });
+  }
+};
+
+// Export admin functions
 module.exports = {
   getDashboardOverview,
   getAllUsers,
@@ -311,5 +493,8 @@ module.exports = {
   deleteUser,
   moderateJob,
   moderateProduct,
-  getReportedContent
+  getReportedContent,
+  getDisputedOrders,
+  resolveDispute,
+  getAuditLogs
 };

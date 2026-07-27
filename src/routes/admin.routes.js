@@ -10,7 +10,10 @@ const {
   deleteUser,
   moderateJob,
   moderateProduct,
-  getReportedContent
+  getReportedContent,
+  getDisputedOrders,
+  resolveDispute,
+  getAuditLogs
 } = require('../controllers/admin.controller');
 
 const { authenticate, adminOnly } = require('../middleware/auth.middleware');
@@ -67,5 +70,26 @@ router.put('/products/:productId/moderate', moderateProduct);
  * @access  Admin
  */
 router.get('/reported', getReportedContent);
+
+/**
+ * @route   GET /api/v1/admin/disputes
+ * @desc    Get disputed orders
+ * @access  Admin
+ */
+router.get('/disputes', getDisputedOrders);
+
+/**
+ * @route   POST /api/v1/admin/disputes/:id/resolve
+ * @desc    Resolve a disputed order
+ * @access  Admin
+ */
+router.post('/disputes/:id/resolve', resolveDispute);
+
+/**
+ * @route   GET /api/v1/admin/audit-logs
+ * @desc    Get audit logs with filters
+ * @access  Admin
+ */
+router.get('/audit-logs', getAuditLogs);
 
 module.exports = router;

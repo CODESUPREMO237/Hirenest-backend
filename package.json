@@ -22,6 +22,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@hachther/mesomb": "^3.0.1",
+    "@sentry/node": "^10.68.0",
     "agenda": "^5.0.0",
     "axios": "^1.9.0",
     "bcryptjs": "^3.0.2",

@@ -138,7 +138,7 @@ const authenticate = async (req, res, next) => {
 };
 
 /**
- * Optional authentication - allows both authenticated and guest users
+ * Optional authentication - allows both authenticated and unauthenticated users
  */
 const optionalAuthenticate = async (req, res, next) => {
   try {
@@ -165,13 +165,13 @@ const optionalAuthenticate = async (req, res, next) => {
         req.user = null;
       }
     } catch (error) {
-      // Token invalid or expired, continue as guest
+      // Token invalid or expired, continue unauthenticated
       req.user = null;
     }
 
     next();
   } catch (error) {
-    logger.warn('Optional auth failed, continuing as guest:', error.message);
+    logger.warn('Optional auth failed, continuing unauthenticated:', error.message);
     req.user = null;
     next();
   }
@@ -229,34 +229,7 @@ const can = (action) => {
   };
 };
 
-/**
- * Check guest limits before allowing action
- */
-const checkGuestLimit = (limitType) => {
-  return async (req, res, next) => {
-    if (req.user && req.user.role !== 'guest') {
-      return next();
-    }
 
-    if (!req.user || req.user.role === 'guest') {
-      if (req.user && !req.user.checkGuestLimit(limitType)) {
-        return res.status(403).json({
-          status: 'error',
-          message: 'Guest limit exceeded. Please register to continue.',
-          code: 'GUEST_LIMIT_EXCEEDED',
-          limitType,
-          suggestion: 'Create an account to unlock unlimited access'
-        });
-      }
-
-      if (req.user) {
-        await req.user.incrementGuestAction(limitType);
-      }
-    }
-
-    next();
-  };
-};
 
 /**
  * Verify email is verified
@@ -349,7 +322,7 @@ const adminOnly = (req, res, next) => {
  */
 const roleBasedRateLimit = (limits) => {
   return (req, res, next) => {
-    const userRole = req.user?.role || 'guest';
+    const userRole = req.user?.role || 'unauthenticated';
     const limit = limits[userRole] || limits.default;
 
     // Implement rate limiting logic here
@@ -365,7 +338,6 @@ module.exports = {
   optionalAuthenticate,
   authorize,
   can,
-  checkGuestLimit,
   requireEmailVerification,
   isOwner,
   adminOnly,

@@ -20,8 +20,7 @@ const {
 const {
   authenticate,
   authorize,
-  optionalAuthenticate,
-  checkGuestLimit
+  optionalAuthenticate
 } = require('../middleware/auth.middleware');
 
 const { uploadProductImage } = require('../middleware/upload.middleware');
@@ -30,7 +29,7 @@ const { validate, createProductSchema, updateProductSchema } = require('../middl
 // Public routes - SPECIFIC PATHS FIRST!
 router.get('/products/nearby', optionalAuthenticate, getNearbyProducts);
 router.get('/categories', getCategories);
-router.get('/products', optionalAuthenticate, checkGuestLimit('productsViewed'), getAllProducts);
+router.get('/products', optionalAuthenticate, getAllProducts);
 
 // Protected routes (Job Seekers and Employers only) - SPECIFIC PATHS FIRST!
 router.post('/products', authenticate, authorize('jobseeker', 'employer'), uploadProductImage.array('images', 5), validate(createProductSchema), createProduct);
@@ -40,7 +39,7 @@ router.get('/my-products', authenticate, authorize('jobseeker', 'employer'), get
 router.get('/products/seller/:sellerId', optionalAuthenticate, getProductsBySeller);
 
 // Routes with :id parameter - THESE MUST COME LAST!
-router.get('/products/:id', optionalAuthenticate, checkGuestLimit('productsViewed'), getProductById);
+router.get('/products/:id', optionalAuthenticate, getProductById);
 router.put('/products/:id', authenticate, authorize('jobseeker', 'employer'), uploadProductImage.array('images', 5), validate(updateProductSchema), updateProduct);
 router.delete('/products/:id', authenticate, authorize('jobseeker', 'employer'), deleteProduct);
 router.put('/products/:id/mark-sold', authenticate, authorize('jobseeker', 'employer'), markAsSold);

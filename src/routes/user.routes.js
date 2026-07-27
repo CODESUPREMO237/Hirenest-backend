@@ -15,9 +15,9 @@ const {
   addFCMToken,
   removeFCMToken,
   deleteAccount,
-  upgradeFromGuest,
   getActiveSessions,
-  searchUsers
+  searchUsers,
+  getTalent
 } = require('../controllers/user.controller');
 
 const { 
@@ -34,8 +34,7 @@ const {
   updateEmailSchema,
   updatePhoneSchema,
   updatePasswordSchema,
-  addFCMTokenSchema,
-  upgradeAccountSchema
+  addFCMTokenSchema
 } = require('../middleware/validation.middleware');
 
 // ==================== PROFILE MANAGEMENT ====================
@@ -155,12 +154,7 @@ router.delete('/me/fcm-token', authenticate, validate(addFCMTokenSchema), remove
 
 // ==================== ACCOUNT MANAGEMENT ====================
 
-/**
- * @route   POST /api/v1/users/me/upgrade
- * @desc    Upgrade from guest to registered user
- * @access  Private (Guests only)
- */
-router.post('/me/upgrade', authenticate, authorize('guest'), validate(upgradeAccountSchema), upgradeFromGuest);
+
 
 /**
  * @route   DELETE /api/v1/users/me
@@ -177,6 +171,13 @@ router.delete('/me', authenticate, deleteAccount);
  */
 // ✅ THIS MUST BE ABOVE /:id
 router.get('/search', authenticate, searchUsers);
+
+/**
+ * @route   GET /api/v1/users/talent
+ * @desc    Discover job seekers/talent
+ * @access  Private (Authenticated users)
+ */
+router.get('/talent', optionalAuthenticate, getTalent);
 
 /**
  * @route   GET /api/v1/users/:id
@@ -222,6 +223,7 @@ router.delete('/me/notifications/:timestamp', authenticate, async (req, res) => 
 
 // Add this line above the module.exports
 router.get('/:id/public-profile', optionalAuthenticate, getUserById);
+
 
 
 

@@ -1,3 +1,6 @@
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 console.log('🔥 SERVER FILE EXECUTED');
 
 // Step-by-step execution tracking
@@ -5,10 +8,23 @@ try {
   console.log('Step 1: Loading dotenv...');
   require('dotenv').config();
   console.log('✅ Step 1: dotenv loaded');
+  
+  // Initialize Sentry early
+  if (process.env.SENTRY_DSN) {
+    const Sentry = require('@sentry/node');
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV || 'development',
+      tracesSampleRate: 1.0,
+    });
+    console.log('✅ Sentry initialized');
+  }
+
   console.log('ENV CHECK:', {
     NODE_ENV: process.env.NODE_ENV,
     PORT: process.env.PORT,
-    MONGO_URI: process.env.MONGO_URI ? '✓ Found' : '✗ Missing'
+    MONGO_URI: process.env.MONGO_URI ? '✓ Found' : '✗ Missing',
+    SENTRY_DSN: process.env.SENTRY_DSN ? '✓ Found' : '✗ Missing'
   });
 } catch (error) {
   console.error('❌ Failed at Step 1 (dotenv):', error.message);
@@ -69,6 +85,8 @@ try {
   console.log('  ✓ review routes');
   const notificationRoutes = require('./routes/notification.routes');
   console.log('  ✓ notification routes ');
+  const deliveryRoutes = require('./routes/delivery.routes');
+  console.log('  ✓ delivery routes ');
   console.log('✅ Step 4: All routes loaded');
 } catch (error) {
   console.error('❌ Failed at Step 4 (routes):', error.message);
@@ -126,7 +144,16 @@ const { errorHandler } = require('./middleware/error.middleware');
 const { rateLimiter } = require('./middleware/rateLimiter.middleware');
 const { initializeSocketHandlers } = require('./socket/socket.handlers');
 const notificationRoutes = require('./routes/notification.routes');
+const deliveryRoutes = require('./routes/delivery.routes');
 
+// Phase 6-12 routes
+const gdprRoutes = require('./routes/gdpr.routes');
+const verificationRoutes = require('./routes/verification.routes');
+const savedSearchRoutes = require('./routes/saved-search.routes');
+const subscriptionRoutes = require('./routes/subscription.routes');
+const matchingRoutes = require('./routes/matching.routes');
+const featureFlagRoutes = require('./routes/feature-flag.routes');
+const legalRoutes = require('./routes/legal.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -345,6 +372,32 @@ console.log('    notificationRoutes type:', typeof notificationRoutes, notificat
 app.use(`/api/${API_VERSION}/notifications`, notificationRoutes);
 console.log('  ✓ notification routes registered');
 
+console.log('  → Registering delivery routes...');
+console.log('    deliveryRoutes type:', typeof deliveryRoutes, deliveryRoutes.constructor?.name);
+app.use(`/api/${API_VERSION}/orders`, deliveryRoutes);
+console.log('  ✓ delivery routes registered');
+
+// Phase 6-12 routes
+app.use(`/api/${API_VERSION}/account`, gdprRoutes);
+console.log('  ✓ gdpr/account routes registered');
+
+app.use(`/api/${API_VERSION}/verifications`, verificationRoutes);
+console.log('  ✓ verification routes registered');
+
+app.use(`/api/${API_VERSION}/saved-searches`, savedSearchRoutes);
+console.log('  ✓ saved search routes registered');
+
+app.use(`/api/${API_VERSION}/subscriptions`, subscriptionRoutes);
+console.log('  ✓ subscription routes registered');
+
+app.use(`/api/${API_VERSION}/matching`, matchingRoutes);
+console.log('  ✓ matching routes registered');
+
+app.use(`/api/${API_VERSION}/feature-flags`, featureFlagRoutes);
+console.log('  ✓ feature flag routes registered');
+
+app.use(`/api/${API_VERSION}/legal`, legalRoutes);
+console.log('  ✓ legal routes registered');
 
   // 404 handler
   app.use('*', (req, res) => {
@@ -357,6 +410,11 @@ console.log('  ✓ notification routes registered');
   console.log('  ✓ 404 handler');
 
   // Error handler
+  if (process.env.SENTRY_DSN) {
+    const Sentry = require('@sentry/node');
+    Sentry.setupExpressErrorHandler(app);
+    console.log('  ✓ sentry error handler');
+  }
   app.use(errorHandler);
   console.log('  ✓ error handler');
   
@@ -404,8 +462,13 @@ const startServer = async () => {
     });
 
     // Graceful shutdown
-    process.on('SIGTERM', () => {
+    process.on('SIGTERM', async () => {
       console.log('👋 SIGTERM received. Shutting down gracefully...');
+      try {
+        const { gracefulShutdown } = require('./config/scheduler');
+        await gracefulShutdown();
+      } catch (err) {}
+      
       server.close(() => {
         console.log('✅ Server closed');
         mongoose.connection.close(false, () => {
@@ -415,8 +478,13 @@ const startServer = async () => {
       });
     });
 
-    process.on('SIGINT', () => {
+    process.on('SIGINT', async () => {
       console.log('\n👋 SIGINT received. Shutting down gracefully...');
+      try {
+        const { gracefulShutdown } = require('./config/scheduler');
+        await gracefulShutdown();
+      } catch (err) {}
+      
       server.close(() => {
         console.log('✅ Server closed');
         mongoose.connection.close(false, () => {
@@ -425,6 +493,10 @@ const startServer = async () => {
         });
       });
     });
+
+    // Start background jobs via Agenda scheduler
+    const { initializeScheduler, gracefulShutdown } = require('./config/scheduler');
+    await initializeScheduler(process.env.MONGO_URI);
 
     process.on('unhandledRejection', (err) => {
       console.error('❌ UNHANDLED REJECTION:', err);

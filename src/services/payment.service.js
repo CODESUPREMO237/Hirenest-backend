@@ -2,8 +2,7 @@
 // MESOMB PAYMENT SERVICE WITH DEBUGGING
 // src/services/payment.service.js
 // ============================================================================
-const axios = require('axios');
-const crypto = require('crypto');
+const { PaymentOperation } = require('@hachther/mesomb');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
 const User = require('../models/User');
@@ -12,7 +11,6 @@ const { calculateCommission, formatPhoneNumber } = require('../utils/helpers');
 const { MESOMB_CURRENCY, PAYMENT_STATUS } = require('../utils/constants');
 
 // MeSomb API Configuration
-const MESOMB_API_URL = 'https://mesomb.hachther.com';
 const MESOMB_APPLICATION_KEY = process.env.MESOMB_APPLICATION_KEY;
 const MESOMB_ACCESS_KEY = process.env.MESOMB_ACCESS_KEY;
 const MESOMB_SECRET_KEY = process.env.MESOMB_SECRET_KEY;
@@ -38,102 +36,48 @@ const formatPhoneForMeSomb = (phoneNumber) => {
   return cleaned;
 };
 
-/**
- * Generate Nonce
- */
-const generateNonce = () => {
-  return crypto.randomBytes(16).toString('hex');
-};
-
-/**
- * ✅ Generate MeSomb Signature
- * Format: HMAC-SHA1(SECRET_KEY, METHOD + URL + TIMESTAMP + NONCE + BODY)
- */
-const generateMeSombSignature = (method, url, timestamp, nonce, body = '') => {
-  const signatureData = `${method}${url}${timestamp}${nonce}${body}`;
-  
-  const signature = crypto
-    .createHmac('sha1', MESOMB_SECRET_KEY)
-    .update(signatureData)
-    .digest('hex');
-  
-  logger.info('🔐 MeSomb Signature Generation:', {
-    method,
-    url,
-    timestamp,
-    nonce,
-    bodyLength: body.length,
-    // Security: Only log first/last chars of sensitive data
-    secretKeyPreview: `${MESOMB_SECRET_KEY.substring(0, 4)}...${MESOMB_SECRET_KEY.slice(-4)}`,
-    signatureDataPreview: `${signatureData.substring(0, 50)}...`,
-    signature
+const getMeSombClient = () => {
+  return new PaymentOperation({
+    applicationKey: MESOMB_APPLICATION_KEY,
+    accessKey: MESOMB_ACCESS_KEY,
+    secretKey: MESOMB_SECRET_KEY,
   });
-  
-  return signature;
-};
-
-/**
- * ✅ Creates MeSomb Headers
- */
-const getMeSombHeaders = (method, endpoint, nonce, timestamp, body = null) => {
-  const bodyString = body ? JSON.stringify(body) : '';
-  
-  const signature = generateMeSombSignature(
-    method,
-    endpoint,
-    timestamp,
-    nonce,
-    bodyString
-  );
-
-  const headers = {
-    'X-MeSomb-Application': MESOMB_APPLICATION_KEY,
-    'X-MeSomb-AccessKey': MESOMB_ACCESS_KEY,
-    'X-MeSomb-Timestamp': timestamp.toString(),
-    'X-MeSomb-Nonce': nonce,
-    'X-MeSomb-Signature': signature,
-    'Content-Type': 'application/json',
-  };
-
-  logger.info('📤 Request Headers:', {
-    'X-MeSomb-Application': `${MESOMB_APPLICATION_KEY.substring(0, 8)}...`,
-    'X-MeSomb-AccessKey': `${MESOMB_ACCESS_KEY.substring(0, 8)}...`,
-    'X-MeSomb-Timestamp': headers['X-MeSomb-Timestamp'],
-    'X-MeSomb-Nonce': headers['X-MeSomb-Nonce'],
-    'X-MeSomb-Signature': headers['X-MeSomb-Signature']
-  });
-
-  return headers;
 };
 
 /**
  * ✅ Create Payment
  */
-const createPayment = async (productId, userId, phoneNumber, paymentMethod, manualAmount, type = 'purchase') => {
+const createPayment = async (productId, userId, phoneNumber, paymentMethod, idempotencyKey) => {
   try {
-    let amount, productName, sellerId, commission = 0, sellerAmount = 0;
-
-    // Determine payment details
-    if (type === 'deposit') {
-      amount = parseFloat(manualAmount);
-      if (isNaN(amount) || amount < 100) {
-        throw new Error('Invalid deposit amount (minimum 100 XAF)');
+    // 1. Idempotency Check
+    if (idempotencyKey) {
+      const existingOrder = await Order.findOne({ idempotencyKey, buyer: userId });
+      if (existingOrder) {
+        logger.info(`♻️ Idempotency key match found for ${idempotencyKey}. Returning existing order.`);
+        return { 
+          success: true, 
+          order: existingOrder, 
+          mesombData: { reference: existingOrder.orderNumber, status: existingOrder.payment.paymentStatus } 
+        };
       }
-      productName = "Wallet Top-up";
-      sellerId = userId;
-      sellerAmount = amount;
-    } else {
-      const product = await Product.findById(productId).populate('seller');
-      if (!product) throw new Error('Product not found');
-      
-      amount = product.price.amount;
-      productName = product.name;
-      sellerId = product.seller._id;
-      
-      const calculation = calculateCommission(amount);
-      commission = calculation.commission;
-      sellerAmount = calculation.sellerAmount;
     }
+
+    // Look up the product
+    const product = await Product.findById(productId).populate('seller');
+    if (!product) throw new Error('Product not found');
+    
+    const amount = product.price.amount;
+    const productName = product.name;
+    const sellerId = product.seller._id;
+    
+    const calculation = calculateCommission(amount);
+    const commission = calculation.commission;
+    
+    // Shift the fee burden to the buyer:
+    // The buyer pays the product price + platform fee.
+    // The seller receives the full product price.
+    const totalAmountToCharge = amount + commission;
+    const sellerAmount = amount;
 
     // ✅ Format phone
     const localPhone = formatPhoneForMeSomb(phoneNumber);
@@ -143,8 +87,8 @@ const createPayment = async (productId, userId, phoneNumber, paymentMethod, manu
     const order = await Order.create({
       buyer: userId,
       seller: sellerId,
-      product: type === 'purchase' ? productId : null,
-      type,
+      product: productId,
+      type: 'purchase',
       productSnapshot: { name: productName },
       pricing: { 
         productPrice: amount, 
@@ -157,75 +101,41 @@ const createPayment = async (productId, userId, phoneNumber, paymentMethod, manu
         paymentStatus: PAYMENT_STATUS.PENDING, 
         phoneNumber: localPhone 
       },
-      status: 'pending_payment'
+      status: 'pending_payment',
+      idempotencyKey: idempotencyKey || undefined
     });
 
-    // ✅ Generate nonce ONCE
-    const nonce = generateNonce();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const endpoint = '/api/v1.1/payment/collect/';
+    const client = getMeSombClient();
 
-    // ✅ Payment data
-    const paymentData = {
-      nonce: nonce, // SAME nonce
-      amount: amount,
-      service: service,
+    logger.info('💳 Creating MeSomb Payment SDK call:', {
+      orderNumber: order.orderNumber,
+      amount: totalAmountToCharge,
+      service,
+      payer: `***${localPhone.slice(-4)}`
+    });
+
+    // Make request in background so the frontend can receive the orderId instantly
+    // and show the "Check your phone" dialog while MeSomb processes it.
+    _executeCollectWithPollingFallback(client, {
+      amount: totalAmountToCharge,
+      service,
       payer: localPhone,
       trxID: order.orderNumber,
       currency: MESOMB_CURRENCY,
       country: 'CM'
-    };
+    }, order._id);
 
-    logger.info('💳 Creating MeSomb Payment:', {
-      endpoint,
-      orderNumber: order.orderNumber,
-      timestamp,
-      nonce,
-      paymentData: {
-        ...paymentData,
-        payer: `***${localPhone.slice(-4)}`
-      },
-      credentials: {
-        applicationKey: `${MESOMB_APPLICATION_KEY.substring(0, 8)}...`,
-        accessKey: `${MESOMB_ACCESS_KEY.substring(0, 8)}...`,
-        secretKeyLength: MESOMB_SECRET_KEY?.length
-      }
-    });
-
-    // ✅ Generate headers with SAME nonce
-    const headers = getMeSombHeaders('POST', endpoint, nonce, timestamp, paymentData);
-
-    logger.info('🌐 Full Request Details:', {
-      url: `${MESOMB_API_URL}${endpoint}`,
-      method: 'POST',
-      headersCount: Object.keys(headers).length,
-      bodySize: JSON.stringify(paymentData).length
-    });
-
-    // Make request
-    const response = await axios.post(
-      `${MESOMB_API_URL}${endpoint}`,
-      paymentData,
-      { headers }
-    );
-
-    logger.info('✅ MeSomb Payment Success:', response.data);
-
-    // Update order
-    order.payment.mesombReference = response.data.transaction?.pk || response.data.reference;
-    order.payment.paymentStatus = PAYMENT_STATUS.PROCESSING;
-    order.status = 'payment_processing';
-    await order.save();
-
+    // Return immediately so UI can show the modal and start polling!
     return { 
       success: true, 
       order, 
-      mesombData: response.data 
+      mesombData: { reference: order.orderNumber, status: 'PENDING' } 
     };
 
   } catch (error) {
     logger.error('❌ Payment Creation Error:', {
       message: error.message,
+      name: error.name,
       responseData: error.response?.data,
       responseStatus: error.response?.status,
       responseHeaders: error.response?.headers,
@@ -242,56 +152,75 @@ const createPayment = async (productId, userId, phoneNumber, paymentMethod, manu
         solution: 'Double-check your credentials at https://business.mesomb.com'
       });
     }
+
+    // Sanitize MeSomb 500 Internal Server Errors (which return raw HTML)
+    if (error.name === 'ServerError' || (error.message && error.message.includes('<html'))) {
+      throw new Error('Payment gateway is currently experiencing issues. Please try again later or verify your payment details.');
+    }
     
     throw error;
   }
 };
 
 /**
- * ✅ Check payment status
+ * ✅ Check payment status (called by frontend polling)
  */
 const checkPaymentStatus = async (orderId) => {
   try {
     const order = await Order.findById(orderId);
     if (!order) throw new Error('Order not found');
 
-    if (!order.payment.mesombReference) {
-      throw new Error('No MeSomb reference found');
+    // If already completed or failed, just return the status
+    if (order.payment.paymentStatus === PAYMENT_STATUS.COMPLETED || order.payment.paymentStatus === PAYMENT_STATUS.FAILED) {
+      return { 
+        success: true, 
+        order, 
+        paymentStatus: order.payment.paymentStatus,
+        mesombStatus: order.payment.paymentStatus === PAYMENT_STATUS.COMPLETED ? 'SUCCESS' : 'FAILED'
+      };
     }
 
-    const nonce = generateNonce();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const endpoint = `/api/v1.1/payment/transactions/?ids=${order.payment.mesombReference}`;
+    // If no reference yet, the background task hasn't finished makeCollect
+    // (or polling fallback hasn't found the result yet). Just return PENDING.
+    if (!order.payment.mesombReference && !order.orderNumber) {
+      return { 
+        success: true, 
+        order, 
+        paymentStatus: order.payment.paymentStatus,
+        mesombStatus: 'PENDING'
+      };
+    }
+
+    // Try to query MeSomb directly for the current status
+    const client = getMeSombClient();
+    const lookupRef = order.payment.mesombReference || order.orderNumber;
     
-    const headers = getMeSombHeaders('GET', endpoint, nonce, timestamp);
+    logger.info(`🔍 Checking MeSomb status for ref: ${lookupRef}`);
+    const transactions = await client.getTransactions([lookupRef]);
 
-    const response = await axios.get(
-      `${MESOMB_API_URL}${endpoint}`,
-      { headers }
-    );
+    const transaction = Array.isArray(transactions) ? transactions[0] : transactions;
+    if (!transaction) {
+      // No transaction found yet — still processing
+      return { success: true, order, paymentStatus: order.payment.paymentStatus, mesombStatus: 'PENDING' };
+    }
+    
+    logger.info(`✅ Status response:`, transaction);
 
-    const transaction = response.data[0];
-    if (!transaction) throw new Error('Transaction not found');
-
-    // Update order based on status
+    // Update order based on MeSomb's response
     if (transaction.status === 'SUCCESS') {
-      order.payment.paymentStatus = PAYMENT_STATUS.COMPLETED;
-      order.payment.paidAt = new Date();
-      order.status = order.type === 'deposit' ? 'completed' : 'paid';
-
-      if (order.type === 'deposit') {
-        await User.findByIdAndUpdate(order.buyer, {
-          $inc: { 'wallet.balance': order.pricing.productPrice }
-        });
-      }
-
-      await order.save();
+      const ref = transaction.pk || transaction.id || transaction.reference;
+      await _finalizeSuccessfulPayment(order._id, ref);
+      // Re-fetch for the updated order
+      const updatedOrder = await Order.findById(orderId);
+      return { success: true, order: updatedOrder, paymentStatus: PAYMENT_STATUS.COMPLETED, mesombStatus: 'SUCCESS' };
     } else if (transaction.status === 'FAILED' || transaction.status === 'CANCELLED') {
       order.payment.paymentStatus = PAYMENT_STATUS.FAILED;
       order.status = 'cancelled';
       await order.save();
+      return { success: true, order, paymentStatus: PAYMENT_STATUS.FAILED, mesombStatus: transaction.status };
     }
 
+    // Still pending
     return { 
       success: true, 
       order, 
@@ -301,6 +230,9 @@ const checkPaymentStatus = async (orderId) => {
 
   } catch (error) {
     logger.error('Status check error:', error);
+    if (error.name === 'ServerError' || (error.message && error.message.includes('<html'))) {
+      throw new Error('Payment gateway is currently experiencing issues. Please try again later.');
+    }
     throw error;
   }
 };
@@ -313,31 +245,23 @@ const processPayout = async (sellerId, amount, phoneNumber) => {
     const localPhone = formatPhoneForMeSomb(phoneNumber);
     const service = localPhone.startsWith('67') ? 'MTN' : 'ORANGE';
     
-    const nonce = generateNonce();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const endpoint = '/api/v1.1/payment/deposit/';
-    
-    const payoutData = {
-      nonce: nonce,
+    const client = getMeSombClient();
+
+    const response = await client.makeDeposit({
       amount: amount,
       receiver: localPhone,
       service: service,
       currency: MESOMB_CURRENCY,
       country: 'CM'
-    };
+    });
 
-    const headers = getMeSombHeaders('POST', endpoint, nonce, timestamp, payoutData);
-
-    const response = await axios.post(
-      `${MESOMB_API_URL}${endpoint}`,
-      payoutData,
-      { headers }
-    );
-
-    return { success: true, transaction: response.data };
+    return { success: true, transaction: response };
 
   } catch (error) {
     logger.error('Payout error:', error);
+    if (error.name === 'ServerError' || (error.message && error.message.includes('<html'))) {
+      throw new Error('Payment gateway is currently experiencing issues. Please try again later.');
+    }
     throw error;
   }
 };
@@ -356,26 +280,15 @@ const refundPayment = async (orderId, reason) => {
 
     const service = order.payment.phoneNumber.startsWith('67') ? 'MTN' : 'ORANGE';
     
-    const nonce = generateNonce();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const endpoint = '/api/v1.1/payment/deposit/';
+    const client = getMeSombClient();
 
-    const refundData = {
-      nonce: nonce,
+    const response = await client.makeDeposit({
       amount: order.pricing.productPrice,
       receiver: order.payment.phoneNumber,
       service: service,
       currency: MESOMB_CURRENCY,
       country: 'CM'
-    };
-
-    const headers = getMeSombHeaders('POST', endpoint, nonce, timestamp, refundData);
-
-    const response = await axios.post(
-      `${MESOMB_API_URL}${endpoint}`,
-      refundData,
-      { headers }
-    );
+    });
 
     // Update order
     order.payment.paymentStatus = PAYMENT_STATUS.REFUNDED;
@@ -400,8 +313,172 @@ const refundPayment = async (orderId, reason) => {
 
   } catch (error) {
     logger.error('Refund error:', error);
+    if (error.name === 'ServerError' || (error.message && error.message.includes('<html'))) {
+      throw new Error('Payment gateway is currently experiencing issues. Please try again later.');
+    }
     throw error;
   }
+};
+
+// ============================================================================
+// BACKGROUND COLLECT WITH POLLING FALLBACK (Phase 2)
+// ============================================================================
+
+/**
+ * Shared handler for when a payment is confirmed as successful.
+ * Called from both the makeCollect callback and the polling fallback.
+ */
+const _finalizeSuccessfulPayment = async (orderId, mesombReference) => {
+  const order = await Order.findById(orderId);
+  if (!order) return;
+
+  // Guard: don't double-finalize
+  if (order.payment.paymentStatus === PAYMENT_STATUS.COMPLETED) {
+    logger.info(`♻️ Order ${order.orderNumber} already finalized, skipping.`);
+    return;
+  }
+
+  order.payment.mesombReference = mesombReference;
+  order.payment.paymentStatus = PAYMENT_STATUS.COMPLETED;
+  order.payment.paidAt = new Date();
+  order.status = 'PAID_ESCROW';
+  order.escrowHeldAt = new Date();
+  await order.save();
+
+  // Write to EscrowLedger
+  const escrowService = require('./escrow.service');
+  await escrowService.holdFundsInEscrow(order._id, order.pricing.productPrice, 'system');
+
+  // Generate OTP
+  const otpService = require('./otp.service');
+  const otpResult = await otpService.createOtpForOrder(order._id);
+
+  // Notify buyer with OTP
+  const notificationService = require('./notification.service');
+  await notificationService.sendToUser(
+    order.buyer,
+    'Payment Confirmed',
+    `Your payment is confirmed. Your delivery OTP is ${otpResult.rawCode}. Show this upon delivery.`,
+    { screen: 'order_details', orderId: order._id.toString() },
+    'escrow_held'
+  );
+
+  // Notify seller to ship
+  const product = await Product.findById(order.product);
+  if (product) {
+    await notificationService.sendToUser(
+      product.seller,
+      'Item Sold!',
+      'A buyer has paid for your item. Please prepare it for shipping.',
+      { screen: 'seller_orders', orderId: order._id.toString() },
+      'item_sold'
+    );
+  }
+
+  logger.info(`✅ Order ${order.orderNumber} finalized successfully.`);
+};
+
+/**
+ * Fire makeCollect. If it succeeds/fails via callback, handle immediately.
+ * If it hasn't resolved within 30s, start a polling fallback loop
+ * (every 10s, max 12 attempts = ~2 min) to query getTransactions().
+ */
+const _executeCollectWithPollingFallback = (client, collectParams, orderId) => {
+  let resolved = false;
+
+  // 1. Fire the makeCollect call
+  client.makeCollect(collectParams)
+    .then(async (response) => {
+      resolved = true;
+      logger.info('✅ MeSomb makeCollect callback succeeded');
+      const transaction = response.transaction || response;
+      const ref = transaction.pk || transaction.id || transaction.reference;
+      await _finalizeSuccessfulPayment(orderId, ref);
+    })
+    .catch(async (error) => {
+      resolved = true;
+      logger.error('❌ MeSomb makeCollect callback failed:', error.message);
+
+      // Don't mark as failed immediately if it's a timeout — the polling fallback
+      // will check the real status. Only mark failed for definitive errors.
+      if (error.name === 'ServerError' || error.message?.includes('<html')) {
+        logger.warn('⚠️ MeSomb gateway error — polling fallback will check real status');
+        return; // Let the polling fallback handle it
+      }
+
+      const order = await Order.findById(orderId);
+      if (order && order.payment.paymentStatus === PAYMENT_STATUS.PENDING) {
+        order.payment.paymentStatus = PAYMENT_STATUS.FAILED;
+        order.status = 'cancelled';
+        await order.save();
+        logger.info(`❌ Order ${order.orderNumber} marked as FAILED.`);
+      }
+    });
+
+  // 2. Polling fallback: if makeCollect hasn't resolved in 30s, start polling
+  setTimeout(async () => {
+    if (resolved) return; // makeCollect already handled it
+
+    logger.info(`⏰ makeCollect hasn't resolved in 30s for order ${orderId}. Starting polling fallback...`);
+
+    const POLL_INTERVAL_MS = 10000; // 10 seconds
+    const MAX_POLL_ATTEMPTS = 12;   // ~2 minutes total
+
+    for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
+      try {
+        // Re-fetch the order to check if makeCollect resolved while we were sleeping
+        const order = await Order.findById(orderId);
+        if (!order) {
+          logger.warn(`⚠️ Polling: Order ${orderId} not found, stopping.`);
+          return;
+        }
+
+        // If status has been updated by the makeCollect callback, stop polling
+        if (order.payment.paymentStatus !== PAYMENT_STATUS.PENDING) {
+          logger.info(`✅ Polling: Order ${order.orderNumber} already resolved (${order.payment.paymentStatus}).`);
+          return;
+        }
+
+        // Query MeSomb for the real transaction status
+        logger.info(`🔍 Polling attempt ${attempt}/${MAX_POLL_ATTEMPTS} for order ${order.orderNumber}`);
+
+        try {
+          const transactions = await client.getTransactions([order.orderNumber]);
+          const transaction = Array.isArray(transactions) ? transactions[0] : transactions;
+
+          if (transaction) {
+            if (transaction.status === 'SUCCESS') {
+              logger.info(`✅ Polling: Transaction ${order.orderNumber} confirmed SUCCESS!`);
+              const ref = transaction.pk || transaction.id || transaction.reference;
+              await _finalizeSuccessfulPayment(orderId, ref);
+              return;
+            } else if (transaction.status === 'FAILED' || transaction.status === 'CANCELLED') {
+              logger.info(`❌ Polling: Transaction ${order.orderNumber} is ${transaction.status}`);
+              order.payment.paymentStatus = PAYMENT_STATUS.FAILED;
+              order.status = 'cancelled';
+              await order.save();
+              return;
+            }
+            // Status is still PENDING — continue polling
+            logger.info(`⏳ Polling: Transaction ${order.orderNumber} still PENDING (attempt ${attempt})`);
+          }
+        } catch (pollError) {
+          logger.warn(`⚠️ Polling query error (attempt ${attempt}):`, pollError.message);
+          // Continue polling — transient errors shouldn't stop us
+        }
+
+        // Wait before next attempt
+        if (attempt < MAX_POLL_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
+      } catch (outerError) {
+        logger.error(`❌ Polling outer error (attempt ${attempt}):`, outerError.message);
+      }
+    }
+
+    // Exhausted all polling attempts — leave as PENDING for the daily reconciliation job (Phase 5)
+    logger.warn(`⚠️ Polling exhausted for order ${orderId}. Left as PENDING for reconciliation.`);
+  }, 30000); // Start polling after 30s
 };
 
 // ============================================================================
@@ -413,12 +490,12 @@ const getSellerBalance = async (userId) => {
     const orders = await Order.find({
       seller: userId,
       'payment.paymentStatus': PAYMENT_STATUS.COMPLETED,
-      status: { $in: ['paid', 'processing', 'shipped', 'delivered', 'completed'] }
+      status: { $in: ['paid', 'processing', 'shipped', 'delivered', 'completed', 'RELEASED', 'AUTO_RELEASED', 'RESOLVED_SELLER'] }
     });
 
     const totalEarnings = orders.reduce((sum, o) => sum + o.pricing.sellerAmount, 0);
     const availableForWithdrawal = orders.reduce((sum, o) => {
-      if (o.status === 'completed' || o.type === 'deposit') {
+      if (['completed', 'RELEASED', 'AUTO_RELEASED', 'RESOLVED_SELLER'].includes(o.status) || o.type === 'deposit') {
         return sum + o.pricing.sellerAmount;
       }
       return sum;
@@ -443,19 +520,34 @@ const getTransactionHistory = async (userId, type = 'all') => {
     else if (type === 'seller') query.seller = userId;
     else query.$or = [{ buyer: userId }, { seller: userId }];
 
-    return await Order.find(query)
+    const orders = await Order.find(query)
       .populate('product buyer seller')
       .sort({ createdAt: -1 })
       .limit(50);
+
+    // Map Orders to Transactions for the frontend
+    return orders.map(order => {
+      const isBuyer = order.buyer?._id.toString() === userId.toString();
+      const transactionType = isBuyer ? 'purchase' : 'payment';
+      const amount = isBuyer 
+        ? order.pricing.productPrice + order.pricing.commission 
+        : order.pricing.sellerAmount;
+
+      return {
+        _id: order._id,
+        id: order._id,
+        type: transactionType,
+        amount: amount,
+        currency: order.pricing.currency,
+        status: order.payment?.paymentStatus || 'PENDING',
+        description: order.product?.name || order.productSnapshot?.name || 'Order',
+        createdAt: order.payment?.paidAt || order.createdAt
+      };
+    });
   } catch (error) {
     logger.error('Transaction history error:', error);
     throw error;
   }
-};
-
-const validateWebhook = (payload, signature) => {
-  logger.info('Webhook received:', payload);
-  return true;
 };
 
 const calculatePlatformRevenue = async (startDate, endDate) => {
@@ -491,7 +583,9 @@ module.exports = {
   getSellerBalance,
   refundPayment,
   getTransactionHistory,
-  validateWebhook,
   calculatePlatformRevenue,
-  formatPhoneForMeSomb
+  formatPhoneForMeSomb,
+  getMeSombClient,
+  _finalizeSuccessfulPayment,
+  PAYMENT_STATUS
 };

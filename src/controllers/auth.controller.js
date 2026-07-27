@@ -839,32 +839,7 @@ const requestPasswordReset = async (req, res) => {
   }
 };
 
-/**
- * Guest Session Management
- */
-const createGuestSession = async (req, res) => {
-  try {
-    const firebaseUser = await admin.auth().createUser({ emailVerified: false });
-    const guestUser = await User.create({
-      firebaseUid: firebaseUser.uid,
-      email: `guest_${firebaseUser.uid}@temp.jobconnect.com`,
-      role: 'guest',
-      profile: { displayName: 'Guest User' },
-      guestLimits: {
-        jobsViewed: { count: 0, lastReset: new Date() },
-        productsViewed: { count: 0, lastReset: new Date() },
-        searchesPerformed: { count: 0, lastReset: new Date() }
-      }
-    });
 
-    const tokens = generateTokenPair(guestUser._id, 'guest', guestUser.email);
-    const firebaseToken = await admin.auth().createCustomToken(firebaseUser.uid, { role: 'guest' });
-
-    res.status(201).json({ status: 'success', data: { user: guestUser, tokens, firebaseToken } });
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: 'Failed to create guest session' });
-  }
-};
 
 /**
  * Utility Checkers
@@ -884,7 +859,7 @@ const checkEmailAvailability = async (req, res) => {
 module.exports = {
   register, login, logout, refreshToken,
   sendVerificationEmailEndpoint, verifyEmail,
-  requestPasswordReset, createGuestSession,
+  requestPasswordReset,
   checkEmailAvailability, socialAuth,
   githubExchange, microsoftExchange,
   linkMicrosoftAccount

@@ -19,12 +19,12 @@ const userSchema = new mongoose.Schema({
     match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please provide a valid email']
   },
 
-  // User Role: jobseeker, employer, guest (3 roles only)
+  // User Role: jobseeker, employer (2 roles only)
   role: {
     type: String,
-    enum: ['jobseeker', 'employer', 'guest'],
+    enum: ['jobseeker', 'employer'],
     required: [true, 'User role is required'],
-    default: 'guest'
+    default: 'jobseeker'
   },
 
   // Profile Information
@@ -266,39 +266,7 @@ socialLogins: {
     }
   },
 
-  // Guest User Limits (tracking)
-  guestLimits: {
-    jobsViewed: {
-      count: {
-        type: Number,
-        default: 0
-      },
-      lastReset: {
-        type: Date,
-        default: Date.now
-      }
-    },
-    productsViewed: {
-      count: {
-        type: Number,
-        default: 0
-      },
-      lastReset: {
-        type: Date,
-        default: Date.now
-      }
-    },
-    searchesPerformed: {
-      count: {
-        type: Number,
-        default: 0
-      },
-      lastReset: {
-        type: Date,
-        default: Date.now
-      }
-    }
-  },
+
 
   // Authentication & Security
   isEmailVerified: {
@@ -391,6 +359,25 @@ socialLogins: {
     type: Number,
     default: 0
   },
+
+  // Verification Badges (Phase 7)
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  verificationBadges: [{
+    type: { type: String, enum: ['identity', 'skill', 'education', 'employment'] },
+    label: String,
+    verifiedAt: Date
+  }],
+
+  // Legal Acceptance (Phase 12)
+  legalAcceptance: {
+    tosVersion: String,
+    tosAcceptedAt: Date,
+    privacyVersion: String,
+    privacyAcceptedAt: Date
+  },
   
   // Soft delete
   deletedAt: {
@@ -438,96 +425,13 @@ userSchema.methods.can = function(action) {
       'post_product',      // Can post to marketplace
       'chat_with_seller',   // Can chat
       'delete_own_product'  // Can delete own products
-    ],
-    guest: [
-      'browse_jobs_limited', 
-      'browse_marketplace_limited'
-      // Guests CANNOT post products or chat
     ]
   };
   
   return permissions[this.role]?.includes(action) || false;
 };
 
-// Method to check if user is registered (not guest)
-userSchema.methods.isRegistered = function() {
-  return this.role !== 'guest';
-};
 
-// Method to check if user can post to marketplace
-userSchema.methods.canPostToMarketplace = function() {
-  return this.role === 'jobseeker' || this.role === 'employer';
-};
-
-// Method to check if user can use chat
-userSchema.methods.canUseChat = function() {
-  return this.role !== 'guest';
-};
-
-// Method to upgrade from guest to registered user
-userSchema.methods.upgradeFromGuest = async function(newRole) {
-  if (this.role !== 'guest') {
-    throw new Error('Only guest users can be upgraded');
-  }
-  
-  if (newRole !== 'jobseeker' && newRole !== 'employer') {
-    throw new Error('New role must be jobseeker or employer');
-  }
-  
-  this.role = newRole;
-  this.guestLimits = undefined;
-  
-  // Initialize role-specific profile
-  if (newRole === 'jobseeker') {
-    this.jobSeekerProfile = {};
-  } else if (newRole === 'employer') {
-    this.employerProfile = {};
-  }
-  
-  // Initialize marketplace stats for all registered users
-  this.marketplaceStats = {
-    productsPosted: 0,
-    activeProducts: 0,
-    totalViews: 0,
-    sellerRating: {
-      average: 0,
-      count: 0
-    }
-  };
-  
-  return await this.save();
-};
-
-// Method to check guest limits
-userSchema.methods.checkGuestLimit = function(limitType) {
-  if (this.role !== 'guest') return true;
-  
-  const limits = {
-    jobsViewed: parseInt(process.env.GUEST_JOB_VIEW_LIMIT) || 10,
-    productsViewed: parseInt(process.env.GUEST_PRODUCT_VIEW_LIMIT) || 20,
-    searchesPerformed: parseInt(process.env.GUEST_SEARCH_LIMIT) || 5
-  };
-  
-  const limit = this.guestLimits[limitType];
-  return limit.count < limits[limitType];
-};
-
-// Method to increment guest action count
-userSchema.methods.incrementGuestAction = async function(actionType) {
-  if (this.role !== 'guest') return;
-  
-  const now = new Date();
-  const limit = this.guestLimits[actionType];
-  
-  // Reset if 24 hours have passed
-  if (now - limit.lastReset > 24 * 60 * 60 * 1000) {
-    limit.count = 0;
-    limit.lastReset = now;
-  }
-  
-  limit.count += 1;
-  await this.save();
-};
 
 // Static method to find active users
 userSchema.statics.findActive = function() {

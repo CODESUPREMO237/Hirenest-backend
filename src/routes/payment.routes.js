@@ -26,19 +26,12 @@ const { validate } = require('../middleware/validation.middleware');
  */
 
 const createPaymentSchema = Joi.object({
-  amount: Joi.number().min(100).when('type', {
-    is: 'deposit',
-    then: Joi.required(),
-    otherwise: Joi.optional()
-  }),
-  type: Joi.string().valid('purchase', 'deposit').default('purchase'),
-  productId: Joi.string().when('type', {
-    is: 'purchase',
-    then: Joi.required(),
-    otherwise: Joi.optional()
-  }),
+  amount: Joi.number().min(100).optional(),
+  type: Joi.string().valid('purchase').default('purchase'),
+  productId: Joi.string().required(),
   phoneNumber: Joi.string().required(),
-  paymentMethod: Joi.string().valid('mesomb_mtn', 'mesomb_orange','mtn', 'orange').required()
+  paymentMethod: Joi.string().valid('mesomb_mtn', 'mesomb_orange','mtn', 'orange').required(),
+  idempotencyKey: Joi.string().optional()
 });
 // Add this below your createPaymentSchema
 const payoutSchema = Joi.object({
@@ -49,11 +42,10 @@ const payoutSchema = Joi.object({
 
 router.post('/create', authenticate, validate(createPaymentSchema), async (req, res) => {
   try {
-    const { productId, phoneNumber, paymentMethod, amount, type } = req.body;
+    const { productId, phoneNumber, paymentMethod, idempotencyKey } = req.body;
     const userId = req.user._id;
 
-    // Pass 'type' and 'amount' to the service
-    const result = await createPayment(productId, userId, phoneNumber, paymentMethod, amount, type);
+    const result = await createPayment(productId, userId, phoneNumber, paymentMethod, idempotencyKey);
 
     res.status(200).json({
       status: 'success',

@@ -14,7 +14,6 @@ const {
   sendVerificationEmailEndpoint,
   verifyEmail,
   requestPasswordReset,
-  createGuestSession,
   checkEmailAvailability,
   socialAuth,
   githubExchange,
@@ -94,12 +93,7 @@ router.post('/microsoft/link', authenticate, validate(microsoftExchangeSchema), 
  */
 router.post('/refresh', validate(refreshTokenSchema), refreshToken);
 
-/**
- * @route   POST /api/v1/auth/guest
- * @desc    Create guest session for limited access
- * @access  Public
- */
-router.post('/guest', createGuestSession);
+
 
 /**
  * @route   POST /api/v1/auth/password-reset

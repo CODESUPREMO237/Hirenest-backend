@@ -104,10 +104,42 @@ const guestRateLimiter = rateLimit({
   }
 });
 
+/**
+ * OTP Generation rate limiter
+ * Scoped by User ID + Order ID to prevent CGNAT IP lockouts on mobile networks
+ */
+const otpRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit to 5 regenerations per order per 15 minutes
+  message: {
+    status: 'error',
+    message: 'Too many OTP requests, please try again later.'
+  },
+  keyGenerator: (req) => {
+    // Scope by user ID and order ID if available
+    if (req.user && req.params.id) {
+      return `otp_${req.user._id}_${req.params.id}`;
+    } else if (req.user) {
+      return `otp_${req.user._id}`;
+    }
+    return `otp_${req.ip}`;
+  },
+  handler: (req, res) => {
+    const identifier = req.user ? req.user._id : req.ip;
+    logger.warn(`OTP rate limit exceeded for identifier: ${identifier}`);
+    res.status(429).json({
+      status: 'error',
+      message: 'Too many OTP requests. Please try again after 15 minutes.',
+      retryAfter: req.rateLimit.resetTime
+    });
+  }
+});
+
 module.exports = {
   rateLimiter,
   strictRateLimiter,
   uploadRateLimiter,
   createRateLimiter,
-  guestRateLimiter
+  guestRateLimiter,
+  otpRateLimiter
 };

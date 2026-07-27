@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Product = require('../models/Product');
 const { admin } = require('../config/firebase');
 const logger = require('../config/logger');
 
@@ -16,6 +17,32 @@ const getMyProfile = async (req, res) => {
         status: 'error',
         message: 'User not found'
       });
+    }
+
+    // Auto-heal marketplace stats if out of sync
+    try {
+      const activeProducts = await Product.countDocuments({ seller: user._id, status: 'active' });
+      const totalProducts = await Product.countDocuments({ seller: user._id });
+      
+      let needsSave = false;
+      if (!user.marketplaceStats) {
+        user.marketplaceStats = { productsPosted: 0, activeProducts: 0, totalViews: 0, sellerRating: { average: 0, count: 0 } };
+        needsSave = true;
+      }
+      
+      if (user.marketplaceStats.activeProducts !== activeProducts || user.marketplaceStats.productsPosted !== totalProducts) {
+        user.marketplaceStats.activeProducts = activeProducts;
+        user.marketplaceStats.productsPosted = totalProducts;
+        needsSave = true;
+      }
+      
+      if (needsSave) {
+        await user.save();
+        logger.info(`Auto-healed marketplace stats for user ${user.email}`);
+      }
+    } catch (statsError) {
+      logger.error('Error auto-healing marketplace stats:', statsError);
+      // Continue anyway, don't fail the profile fetch
     }
 
     res.status(200).json({
@@ -428,7 +455,7 @@ const getUserById = async (req, res) => {
       deletedAt: null
     })
     // Ensure we select marketplaceStats so the Flutter model gets rating/reviews
-    .select('profile role marketplaceStats createdAt privacySettings')
+    .select('profile role marketplaceStats jobSeekerProfile createdAt privacySettings')
     .populate('employerProfile.company', 'name logo website');
 
     if (!user) {
@@ -650,42 +677,7 @@ const deleteAccount = async (req, res) => {
   }
 };
 
-/**
- * Upgrade from guest to registered user
- */
-const upgradeFromGuest = async (req, res) => {
-  try {
-    const { newRole } = req.body;
 
-    if (req.user.role !== 'guest') {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Only guest users can be upgraded'
-      });
-    }
-
-    if (!['jobseeker', 'employer'].includes(newRole)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid role. Must be jobseeker or employer'
-      });
-    }
-
-    const user = await req.user.upgradeFromGuest(newRole);
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Account upgraded successfully',
-      data: { user }
-    });
-  } catch (error) {
-    logger.error('Error upgrading account:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error upgrading account'
-    });
-  }
-};
 // src/controllers/user.controller.js
 const searchUsers = async (req, res) => {
   try {
@@ -699,6 +691,37 @@ const searchUsers = async (req, res) => {
       data: users
     });
   } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+const getTalent = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Fetch users with role 'jobseeker'
+    // Optional: filter out users who haven't completed their profile at all
+    const users = await User.find({ role: 'jobseeker' })
+      .select('-__v -password -firebaseUid')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await User.countDocuments({ role: 'jobseeker' });
+
+    res.status(200).json({
+      status: 'success',
+      data: users,
+      meta: {
+        total,
+        page,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching talent:', error);
     res.status(500).json({ status: 'error', message: error.message });
   }
 };
@@ -718,7 +741,7 @@ module.exports = {
   addFCMToken,
   removeFCMToken,
   deleteAccount,
-  upgradeFromGuest,
   getActiveSessions,
-  searchUsers
+  searchUsers,
+  getTalent
 };

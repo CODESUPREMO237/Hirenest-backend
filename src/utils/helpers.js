@@ -5,7 +5,6 @@
 const USER_ROLES = {
   JOBSEEKER: 'jobseeker',
   EMPLOYER: 'employer',
-  GUEST: 'guest',
   ADMIN: 'admin'
 };
 
@@ -115,12 +114,7 @@ const MESSAGE_TYPES = {
   SYSTEM: 'system'
 };
 
-// Guest Limits
-const GUEST_LIMITS = {
-  JOBS_VIEWED: parseInt(process.env.GUEST_JOB_VIEW_LIMIT) || 10,
-  PRODUCTS_VIEWED: parseInt(process.env.GUEST_PRODUCT_VIEW_LIMIT) || 20,
-  SEARCHES: parseInt(process.env.GUEST_SEARCH_LIMIT) || 5
-};
+
 
 // File Upload Limits
 const UPLOAD_LIMITS = {
@@ -238,7 +232,6 @@ module.exports = {
   PAYMENT_STATUS,
   CHAT_STATUS,
   MESSAGE_TYPES,
-  GUEST_LIMITS,
   UPLOAD_LIMITS,
   PAGINATION,
   COMMISSION_RATE,

@@ -7,9 +7,8 @@ const connectDB = async () => {
     if (!mongoUri) throw new Error('MONGO_URI is not defined in .env');
 
     await mongoose.connect(mongoUri, {
-      // options are optional in latest mongoose
-      // useNewUrlParser: true,
-      // useUnifiedTopology: true
+      serverSelectionTimeoutMS: 10000, // fail faster instead of hanging on DNS/network issues
+      family: 4, // force IPv4 resolution, avoids intermittent ENOTFOUND on flaky IPv6
     });
 
     console.log('✅ MongoDB connected');

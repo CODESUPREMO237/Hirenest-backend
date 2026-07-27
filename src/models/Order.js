@@ -12,6 +12,11 @@ const orderSchema = new mongoose.Schema({
     unique: true,
     default: () => `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`
   },
+  idempotencyKey: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
   type: {
     type: String,
     enum: ['purchase', 'deposit'],
@@ -77,7 +82,18 @@ const orderSchema = new mongoose.Schema({
       'delivered', 
       'completed', 
       'cancelled', 
-      'refunded'
+      'refunded',
+      // Escrow / OTP Delivery Statuses
+      'PAID_ESCROW',
+      'SHIPPED',
+      'OUT_FOR_DELIVERY',
+      'DELIVERED_CONFIRMED',
+      'RELEASED',
+      'DELIVERY_REJECTED',
+      'DISPUTED',
+      'RESOLVED_SELLER',
+      'RESOLVED_BUYER',
+      'AUTO_RELEASED'
     ],
     default: 'pending_payment'
   },
@@ -106,7 +122,15 @@ const orderSchema = new mongoose.Schema({
     status: String
   },
 
-  // 9. Soft Delete
+  // 9. Escrow & OTP Delivery Tracking
+  escrowHeldAt: Date,
+  shippedAt: Date,
+  deliveredConfirmedAt: Date,
+  releasedAt: Date,
+  autoReleaseDeadline: Date,
+  deliveryMethod: { type: String, enum: ['rider', 'pickup_point', 'self_arranged'], default: 'self_arranged' },
+
+  // 10. Soft Delete
   deletedAt: {
     type: Date,
     default: null

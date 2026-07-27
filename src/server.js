@@ -156,6 +156,10 @@ const featureFlagRoutes = require('./routes/feature-flag.routes');
 const legalRoutes = require('./routes/legal.routes');
 
 const app = express();
+
+// Trust proxy required for Express Rate Limit behind Render/Heroku load balancers
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 console.log('✅ Step 7: Express app initialized');
 
